@@ -1,13 +1,17 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Scale, Calendar, Filter, Hammer } from 'lucide-react'
+import { Scale, Calendar, Filter, Hammer, BarChart3, TrendingDown } from 'lucide-react'
 
-interface Totals {
-  fillingIn?: number
+interface KaratTotalItem {
+  karat: number
+  fillingIn: number
+  finishWeight: number
+  karigarLoss: number
+  fineFillingIn: number
+  fineFinishWeight: number
+  fineKarigarLoss: number
 }
-
-type KaratKarigarIn = Record<string, Record<string, number>>
 
 const KARAT_OPTIONS = [
   { label: 'All Karats', value: 'all' },
@@ -21,9 +25,18 @@ const KARAT_OPTIONS = [
 
 export default function AnalyticsPage() {
   const [todayFillingIn, setTodayFillingIn] = useState(0)
+  const [todayFinishWeight, setTodayFinishWeight] = useState(0)
+  const [todayKarigarLoss, setTodayKarigarLoss] = useState(0)
+
   const [monthFillingIn, setMonthFillingIn] = useState(0)
+  const [monthFinishWeight, setMonthFinishWeight] = useState(0)
+  const [monthKarigarLoss, setMonthKarigarLoss] = useState(0)
+
   const [filteredTotalFillingIn, setFilteredTotalFillingIn] = useState(0)
-  const [fillingKarigarIn, setFillingKarigarIn] = useState<KaratKarigarIn>({})
+  const [filteredFinishWeight, setFilteredFinishWeight] = useState(0)
+  const [filteredKarigarLoss, setFilteredKarigarLoss] = useState(0)
+
+  const [karatTotals, setKaratTotals] = useState<Record<string, KaratTotalItem>>({})
   const [dateFilter, setDateFilter] = useState('all')
   const [karatFilter, setKaratFilter] = useState('all')
   const [loading, setLoading] = useState(false)
@@ -52,13 +65,19 @@ export default function AnalyticsPage() {
 
       if (todayData.success) {
         setTodayFillingIn(todayData.data?.totals?.fillingIn || 0)
+        setTodayFinishWeight(todayData.data?.totals?.finishWeight || 0)
+        setTodayKarigarLoss(todayData.data?.totals?.fillingLoss || 0)
       }
       if (monthData.success) {
         setMonthFillingIn(monthData.data?.totals?.fillingIn || 0)
+        setMonthFinishWeight(monthData.data?.totals?.finishWeight || 0)
+        setMonthKarigarLoss(monthData.data?.totals?.fillingLoss || 0)
       }
       if (filteredData.success) {
         setFilteredTotalFillingIn(filteredData.data?.totals?.fillingIn || 0)
-        setFillingKarigarIn(filteredData.data?.fillingKarigarIn || {})
+        setFilteredFinishWeight(filteredData.data?.totals?.finishWeight || 0)
+        setFilteredKarigarLoss(filteredData.data?.totals?.fillingLoss || 0)
+        setKaratTotals(filteredData.data?.karatTotals || {})
       }
     } catch (err) {
       console.error('Failed to load analytics', err)
@@ -71,115 +90,122 @@ export default function AnalyticsPage() {
     fetchAnalytics()
   }, [fetchAnalytics])
 
-  const renderKarigarCard = (
-    title: string,
-    icon: React.ReactNode,
-    data: KaratKarigarIn
-  ) => {
-    const karatKeys = Object.keys(data)
-    const hasData = karatKeys.some(k => Object.keys(data[k]).length > 0)
-
-    return (
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col">
-        <div className="flex items-center gap-2 pb-3.5 mb-3.5 border-b border-gray-100">
-          {icon}
-          <h3 className="text-sm font-bold uppercase tracking-wider text-gray-800">{title}</h3>
-        </div>
-        {hasData ? (
-          <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1 scrollbar-thin">
-            {karatKeys.sort().map((karatLabel) => {
-              const karigarEntries = Object.entries(data[karatLabel])
-              if (karigarEntries.length === 0) return null
-
-              // Calculate subtotal for this karat
-              const karatSubtotal = karigarEntries.reduce((sum, [, val]) => sum + val, 0)
-
-              return (
-                <div key={karatLabel} className="space-y-2">
-                  {/* Karat header */}
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-gray-700 bg-gray-100 px-2 py-0.5 rounded">
-                      {karatLabel}
-                    </span>
-                    <span className="text-xs font-bold px-2 py-0.5 rounded text-blue-700 bg-blue-50">
-                      Total: {karatSubtotal.toFixed(3)} g
-                    </span>
-                  </div>
-                  {/* Karigars within this karat */}
-                  <div className="space-y-1.5 pl-2 border-l-2 border-gray-100">
-                    {karigarEntries.map(([name, val]) => (
-                      <div key={name} className="flex justify-between items-center text-sm py-0.5">
-                        <span className="font-semibold text-gray-600">{name}</span>
-                        <span className="font-bold px-2.5 py-0.5 rounded text-xs text-blue-700 bg-blue-50 border border-blue-100">
-                          {val.toFixed(3)} g
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        ) : (
-          <div className="text-sm text-gray-400 italic py-10 text-center">
-            No records found for this selection.
-          </div>
-        )}
-      </div>
-    )
+  const getKaratLabel = (karat: number | string): string => {
+    const num = typeof karat === 'string' ? parseFloat(karat) : karat
+    switch (num) {
+      case 92: return '22k (92%)'
+      case 75.5: return '18k (75.5%)'
+      case 80: return '19.2k (80%)'
+      case 75: return '18k (75%)'
+      case 76: return '18k (76%)'
+      case 88: return '21k (88%)'
+      case 59: return '14k (59%)'
+      case 37.5: return '9k (37.5%)'
+      default: return `${num}%`
+    }
   }
+
+  // Calculate grand totals for the table
+  const grandTotals = Object.values(karatTotals).reduce((acc, curr) => {
+    acc.fillingIn += curr.fillingIn
+    acc.fineFillingIn += curr.fineFillingIn
+    acc.finishWeight += curr.finishWeight
+    acc.fineFinishWeight += curr.fineFinishWeight
+    acc.karigarLoss += curr.karigarLoss
+    acc.fineKarigarLoss += curr.fineKarigarLoss
+    return acc
+  }, {
+    fillingIn: 0,
+    fineFillingIn: 0,
+    finishWeight: 0,
+    fineFinishWeight: 0,
+    karigarLoss: 0,
+    fineKarigarLoss: 0
+  })
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto p-4 sm:p-6">
       {/* Page Title */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <h1 className="text-2xl font-bold text-gray-900">Filling In Analytics</h1>
-        <p className="text-gray-500 text-sm mt-1">
-          Review total gold issued (Filling In) details across workshops.
-        </p>
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Production Analytics</h1>
+          <p className="text-gray-500 text-sm mt-1">
+            Review gold issued, finished weights, and total loss across different purities.
+          </p>
+        </div>
+        <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
+          <BarChart3 className="w-6 h-6" />
+        </div>
       </div>
 
       {/* Main cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col justify-between">
+        {/* Today Card */}
+        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow">
           <div>
-            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider block">
-              Today's Total Filling In
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-4 border-b pb-2">
+              Today's Summary
             </span>
-            <span className="text-3xl font-bold text-blue-600 mt-2 block">
-              {todayFillingIn.toFixed(3)} g
-            </span>
-          </div>
-          <div className="text-xs text-gray-500 mt-4 pt-3 border-t border-gray-100 leading-relaxed">
-            Gold issued to karigars today
+            <div className="space-y-3.5">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-500">Filling In:</span>
+                <span className="text-base font-bold text-blue-600">{todayFillingIn.toFixed(3)} g</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-500">Finish Weight:</span>
+                <span className="text-base font-bold text-emerald-600">{todayFinishWeight.toFixed(3)} g</span>
+              </div>
+              <div className="flex justify-between items-center border-t pt-2 border-dashed border-gray-100">
+                <span className="text-sm font-medium text-gray-500">Karigar Loss:</span>
+                <span className="text-base font-bold text-rose-600">{todayKarigarLoss.toFixed(3)} g</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col justify-between">
+        {/* This Month Card */}
+        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow">
           <div>
-            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider block">
-              This Month's Total Filling In
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-4 border-b pb-2">
+              This Month's Summary
             </span>
-            <span className="text-3xl font-bold text-indigo-600 mt-2 block">
-              {monthFillingIn.toFixed(3)} g
-            </span>
-          </div>
-          <div className="text-xs text-gray-500 mt-4 pt-3 border-t border-gray-100 leading-relaxed">
-            Gold issued to karigars this month
+            <div className="space-y-3.5">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-500">Filling In:</span>
+                <span className="text-base font-bold text-indigo-600">{monthFillingIn.toFixed(3)} g</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-500">Finish Weight:</span>
+                <span className="text-base font-bold text-emerald-600">{monthFinishWeight.toFixed(3)} g</span>
+              </div>
+              <div className="flex justify-between items-center border-t pt-2 border-dashed border-gray-100">
+                <span className="text-sm font-medium text-gray-500">Karigar Loss:</span>
+                <span className="text-base font-bold text-rose-600">{monthKarigarLoss.toFixed(3)} g</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col justify-between">
+        {/* Filtered Card */}
+        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow">
           <div>
-            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider block">
-              Filtered Total Filling In
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-4 border-b pb-2">
+              Filtered Summary
             </span>
-            <span className="text-3xl font-bold text-purple-600 mt-2 block">
-              {filteredTotalFillingIn.toFixed(3)} g
-            </span>
-          </div>
-          <div className="text-xs text-gray-500 mt-4 pt-3 border-t border-gray-100 leading-relaxed">
-            Based on the selected filters below
+            <div className="space-y-3.5">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-500">Filling In:</span>
+                <span className="text-base font-bold text-purple-600">{filteredTotalFillingIn.toFixed(3)} g</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-500">Finish Weight:</span>
+                <span className="text-base font-bold text-emerald-600">{filteredFinishWeight.toFixed(3)} g</span>
+              </div>
+              <div className="flex justify-between items-center border-t pt-2 border-dashed border-gray-100">
+                <span className="text-sm font-medium text-gray-500">Karigar Loss:</span>
+                <span className="text-base font-bold text-rose-600">{filteredKarigarLoss.toFixed(3)} g</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -189,7 +215,7 @@ export default function AnalyticsPage() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
             <Filter className="w-5 h-5 text-blue-600" />
-            Filter Karigar Breakdown
+            Filter Analytics
           </h2>
 
           <div className="relative flex items-center bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-blue-500">
@@ -218,8 +244,8 @@ export default function AnalyticsPage() {
               key={opt.value}
               onClick={() => setKaratFilter(opt.value)}
               className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 border ${karatFilter === opt.value
-                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                  : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50'
                 }`}
             >
               {opt.label}
@@ -235,14 +261,81 @@ export default function AnalyticsPage() {
         </div>
       )}
 
-      {/* Karigar Workload Breakdown */}
+      {/* Karat & Fine Weight Analytics Summary Table */}
       {!loading && (
-        <div className="grid grid-cols-1 gap-6">
-          {renderKarigarCard(
-            'Filing Karigars Workload (Gold Issued)',
-            <Hammer className="w-5 h-5 text-blue-600" />,
-            fillingKarigarIn
-          )}
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+            <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
+              <Scale className="w-5 h-5 text-blue-600" />
+              Karat & Fine Weight Analytics Summary
+            </h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-200">
+                  <th className="px-6 py-3.5">Karat</th>
+                  <th className="px-6 py-3.5 text-right">Filling In (Karat Wt)</th>
+                  <th className="px-6 py-3.5 text-right text-blue-600 bg-blue-50/50">Filling In (Fine Wt)</th>
+                  <th className="px-6 py-3.5 text-right">Finish Weight (Karat Wt)</th>
+                  <th className="px-6 py-3.5 text-right text-emerald-600 bg-emerald-50/30">Finish Weight (Fine Wt)</th>
+                  <th className="px-6 py-3.5 text-right">Karigar Loss (Karat Wt)</th>
+                  <th className="px-6 py-3.5 text-right text-rose-600 bg-rose-50/30">Karigar Loss (Fine Wt)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 text-sm text-gray-700">
+                {Object.keys(karatTotals).length > 0 ? (
+                  Object.keys(karatTotals).sort((a, b) => parseFloat(b) - parseFloat(a)).map((karatKey) => {
+                    const item = karatTotals[karatKey]
+                    return (
+                      <tr key={karatKey} className="hover:bg-gray-50/80 transition-colors">
+                        <td className="px-6 py-4 font-semibold text-gray-900">
+                          {getKaratLabel(item.karat)}
+                        </td>
+                        <td className="px-6 py-4 text-right font-medium">
+                          {item.fillingIn.toFixed(3)} g
+                        </td>
+                        <td className="px-6 py-4 text-right font-bold text-blue-600 bg-blue-50/30">
+                          {item.fineFillingIn.toFixed(3)} g
+                        </td>
+                        <td className="px-6 py-4 text-right font-medium">
+                          {item.finishWeight.toFixed(3)} g
+                        </td>
+                        <td className="px-6 py-4 text-right font-bold text-emerald-600 bg-emerald-50/10">
+                          {item.fineFinishWeight.toFixed(3)} g
+                        </td>
+                        <td className="px-6 py-4 text-right font-medium text-rose-600">
+                          {item.karigarLoss.toFixed(3)} g
+                        </td>
+                        <td className="px-6 py-4 text-right font-bold text-rose-600 bg-rose-50/10">
+                          {item.fineKarigarLoss.toFixed(3)} g
+                        </td>
+                      </tr>
+                    )
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-10 text-center text-gray-400 italic">
+                      No records found for this selection.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+              {Object.keys(karatTotals).length > 0 && (
+                <tfoot>
+                  <tr className="bg-gray-900 text-white font-bold text-sm border-t-2 border-blue-600">
+                    <td className="px-6 py-4 uppercase tracking-wider">Total</td>
+                    <td className="px-6 py-4 text-right">{grandTotals.fillingIn.toFixed(3)} g</td>
+                    <td className="px-6 py-4 text-right text-blue-300 bg-blue-950">{grandTotals.fineFillingIn.toFixed(3)} g</td>
+                    <td className="px-6 py-4 text-right">{grandTotals.finishWeight.toFixed(3)} g</td>
+                    <td className="px-6 py-4 text-right text-emerald-300 bg-emerald-950/50">{grandTotals.fineFinishWeight.toFixed(3)} g</td>
+                    <td className="px-6 py-4 text-right text-rose-300">{grandTotals.karigarLoss.toFixed(3)} g</td>
+                    <td className="px-6 py-4 text-right text-rose-300 bg-rose-950/50">{grandTotals.fineKarigarLoss.toFixed(3)} g</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
         </div>
       )}
     </div>

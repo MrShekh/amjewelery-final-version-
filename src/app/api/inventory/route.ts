@@ -1,25 +1,25 @@
 import { NextRequest } from 'next/server'
-import { getInventoryCollection, getUsersCollection } from '@/lib/mongodb'
+import { getInventoryCollection, getUsersCollection, getOrdersCollection } from '@/lib/mongodb'
 import { toClientFormat } from '@/types/mongodb'
 import { ObjectId } from 'mongodb'
 import { verifyToken, extractTokenFromHeader } from '@/lib/jwt'
-import { 
-  handleApiError, 
-  handleApiSuccess, 
+import {
+  handleApiError,
+  handleApiSuccess,
   AuthenticationError,
   ValidationError,
-  generateRequestId 
+  generateRequestId
 } from '@/lib/errorHandler'
 
 // GET /api/inventory - Simplified: only expose karigar loss stock + customer stock for dashboard
 export async function GET(request: NextRequest) {
   const requestId = generateRequestId()
-  
+
   try {
     // Extract and verify JWT token
     const authHeader = request.headers.get('authorization')
     const token = extractTokenFromHeader(authHeader)
-    
+
     if (!token) {
       throw new AuthenticationError('Authorization token required')
     }
@@ -33,9 +33,9 @@ export async function GET(request: NextRequest) {
     }
 
     const usersCol = await getUsersCollection()
-    const user = await usersCol.findOne({ 
+    const user = await usersCol.findOne({
       _id: new ObjectId(payload.userId),
-      isActive: true 
+      isActive: true
     })
 
     if (!user) {
@@ -49,9 +49,9 @@ export async function GET(request: NextRequest) {
 
     const userId = user._id.toString()
     const organizationId = user.organizationId
-    
+
     const inventoryCol = await getInventoryCollection()
-    
+
     // Find inventory for this specific user/organization
     let inventory = await inventoryCol.findOne({
       $or: [
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
         { _id: new ObjectId(userId) } // Fallback for existing data
       ]
     })
-    
+
     if (!inventory) {
       // Create initial inventory for this user if doesn't exist
       const now = new Date()
@@ -78,16 +78,16 @@ export async function GET(request: NextRequest) {
       }
       const result = await inventoryCol.insertOne(initialInventory)
       inventory = await inventoryCol.findOne({ _id: result.insertedId })
-      
+
       if (!inventory) {
         throw new Error('Failed to create or retrieve inventory record')
       }
     }
-    
+
     // Ensure all stock fields exist for older inventory records (migration/minimum defaults)
     if (inventory) {
       const updates: Record<string, any> = {}
-      
+
       // Legacy field migration for core stocks
       if (inventory.adminStock === undefined) {
         // If old goldStock exists, use it as adminStock, otherwise default to 0
@@ -97,12 +97,12 @@ export async function GET(request: NextRequest) {
         // If old jamaGold exists, use it as customerStock, otherwise default to 0
         updates.customerStock = inventory.jamaGold || 0
       }
-      
+
       // Initialize karigarLossStock, recoveredStock and advanceCustomerStock if missing
       if (inventory.karigarLossStock === undefined) updates.karigarLossStock = 0
       if (inventory.recoveredStock === undefined) updates.recoveredStock = 0
       if (inventory.advanceCustomerStock === undefined) updates.advanceCustomerStock = 0
-      
+
       if (Object.keys(updates).length > 0) {
         updates.lastUpdated = new Date()
         await inventoryCol.updateOne(
@@ -111,7 +111,7 @@ export async function GET(request: NextRequest) {
         )
         // Get the updated inventory record with the correct ID
         inventory = await inventoryCol.findOne({ _id: inventory._id })
-        
+
         if (!inventory) {
           throw new Error('Failed to retrieve updated inventory record')
         }
@@ -123,7 +123,16 @@ export async function GET(request: NextRequest) {
       throw new Error('Inventory is unexpectedly null')
     }
 
-    const karigarLossStock = inventory.karigarLossStock || 0
+    // Calculate karigarLossStock dynamically from all orders (fillingIn - finishWeight)
+    const ordersCol = await getOrdersCollection()
+    const allOrders = await ordersCol.find({}, { projection: { fillingIn: 1, finishWeight: 1 } }).toArray()
+    let calculatedKarigarLossStock = 0
+    allOrders.forEach((o: any) => {
+      const fIn = o.fillingIn || 0
+      const fWeight = o.finishWeight || 0
+      calculatedKarigarLossStock += Math.max(0, fIn - fWeight)
+    })
+    const karigarLossStock = parseFloat(calculatedKarigarLossStock.toFixed(3))
     const recoveredStock = inventory.recoveredStock || 0
 
     // Return only what dashboard needs: inventory snapshot + simple summary
@@ -149,7 +158,7 @@ export async function GET(request: NextRequest) {
 // POST /api/inventory - Disabled: manual stock adjustment removed in simplified model
 export async function POST(request: NextRequest) {
   const requestId = generateRequestId()
-  
+
   try {
     // Endpoint disabled in simplified stock model: no manual inventory adjustments.
     return handleApiError(

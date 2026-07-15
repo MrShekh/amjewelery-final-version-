@@ -192,14 +192,14 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="bg-gradient-to-r from-blue-400 to-blue-600 p-6 rounded-lg text-white">
           <h3 className="text-sm font-medium text-blue-100 uppercase tracking-wide">
-            Karigar Loss Stock
+            Karigar Total Loss
           </h3>
           <p className="mt-2 text-3xl font-bold">
-            {(inventoryData?.inventory.karigarLossStock ?? inventoryData?.summary.karigarLossStock ?? 0).toFixed(2)}g
+            {(inventoryData?.inventory.karigarLossStock ?? inventoryData?.summary.karigarLossStock ?? 0).toFixed(3)}g
           </p>
-          <p className="text-xs text-blue-100 mt-1">Total loss accumulated in karigar work</p>
+          <p className="text-xs text-blue-100 mt-1">Total loss accumulated (Filing In - Finish Weight)</p>
         </div>
-        
+
         <div className="bg-gradient-to-r from-orange-400 to-red-500 p-6 rounded-lg text-white">
           <h3 className="text-sm font-medium text-orange-100 uppercase tracking-wide">
             Customer Stock
@@ -229,13 +229,13 @@ const Dashboard = () => {
                 {recoveredMode === 'day'
                   ? `Total recovered on ${new Date(recoveredDate).toLocaleDateString('en-IN')}`
                   : (() => {
-                      const safeMonth = recoveredMonth || new Date().toISOString().slice(0, 7)
-                      const d = new Date(safeMonth + '-01')
-                      return `Total recovered in ${d.toLocaleString('en-IN', {
-                        month: 'long',
-                        year: 'numeric'
-                      })}`
-                    })()}
+                    const safeMonth = recoveredMonth || new Date().toISOString().slice(0, 7)
+                    const d = new Date(safeMonth + '-01')
+                    return `Total recovered in ${d.toLocaleString('en-IN', {
+                      month: 'long',
+                      year: 'numeric'
+                    })}`
+                  })()}
               </p>
             </div>
             <div className="ml-4 flex flex-col items-end space-y-2">
@@ -243,18 +243,16 @@ const Dashboard = () => {
                 <button
                   type="button"
                   onClick={() => setRecoveredMode('day')}
-                  className={`px-2 py-0.5 rounded-full ${
-                    recoveredMode === 'day' ? 'bg-white text-emerald-700' : 'text-emerald-100'
-                  }`}
+                  className={`px-2 py-0.5 rounded-full ${recoveredMode === 'day' ? 'bg-white text-emerald-700' : 'text-emerald-100'
+                    }`}
                 >
                   Day
                 </button>
                 <button
                   type="button"
                   onClick={() => setRecoveredMode('month')}
-                  className={`px-2 py-0.5 rounded-full ${
-                    recoveredMode === 'month' ? 'bg-white text-emerald-700' : 'text-emerald-100'
-                  }`}
+                  className={`px-2 py-0.5 rounded-full ${recoveredMode === 'month' ? 'bg-white text-emerald-700' : 'text-emerald-100'
+                    }`}
                 >
                   Month
                 </button>
@@ -304,13 +302,13 @@ const Dashboard = () => {
                 {manualMakingMode === 'day'
                   ? `Total manual making charge for ${new Date(manualMakingDate).toLocaleDateString('en-IN')}`
                   : (() => {
-                      const safeMonth = manualMakingMonth || new Date().toISOString().slice(0, 7)
-                      const d = new Date(safeMonth + '-01')
-                      return `Total manual making charge for ${d.toLocaleString('en-IN', {
-                        month: 'long',
-                        year: 'numeric'
-                      })}`
-                    })()}
+                    const safeMonth = manualMakingMonth || new Date().toISOString().slice(0, 7)
+                    const d = new Date(safeMonth + '-01')
+                    return `Total manual making charge for ${d.toLocaleString('en-IN', {
+                      month: 'long',
+                      year: 'numeric'
+                    })}`
+                  })()}
               </p>
             </div>
             <div className="ml-4 flex flex-col items-end space-y-2">
@@ -318,18 +316,16 @@ const Dashboard = () => {
                 <button
                   type="button"
                   onClick={() => setManualMakingMode('day')}
-                  className={`px-2 py-0.5 rounded-full ${
-                    manualMakingMode === 'day' ? 'bg-white text-indigo-700' : 'text-indigo-100'
-                  }`}
+                  className={`px-2 py-0.5 rounded-full ${manualMakingMode === 'day' ? 'bg-white text-indigo-700' : 'text-indigo-100'
+                    }`}
                 >
                   Day
                 </button>
                 <button
                   type="button"
                   onClick={() => setManualMakingMode('month')}
-                  className={`px-2 py-0.5 rounded-full ${
-                    manualMakingMode === 'month' ? 'bg-white text-indigo-700' : 'text-indigo-100'
-                  }`}
+                  className={`px-2 py-0.5 rounded-full ${manualMakingMode === 'month' ? 'bg-white text-indigo-700' : 'text-indigo-100'
+                    }`}
                 >
                   Month
                 </button>

@@ -23,7 +23,6 @@ export default function RegisterTotalsRow({ totals }: RegisterTotalsRowProps) {
       <td className="border-r border-border/10 text-center">-</td>
       <td className="border-r border-border/10 text-center">-</td>
       <td className="border-r border-border/10 text-center">-</td>
-      <td className="border-r border-border/10 text-center">-</td>
       <td className="px-3 py-2 text-right border-r border-border/10 font-bold">{(totals.fillingIn || 0).toFixed(3)} g</td>
       <td className="px-3 py-2 text-right border-r border-border/10 font-bold text-green-300">{(totals.finishWeight || 0).toFixed(3)} g</td>
       <td></td>

@@ -347,6 +347,57 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Group by karat for analytics
+    const karatTotals: Record<string, {
+      karat: number
+      fillingIn: number
+      finishWeight: number
+      karigarLoss: number
+      fineFillingIn: number
+      fineFinishWeight: number
+      fineKarigarLoss: number
+    }> = {}
+
+    allOrdersForTotals.forEach((o: any) => {
+      const karat = parseFloat(o.selectedKarat) || 92
+      const karatKey = karat.toString()
+
+      if (!karatTotals[karatKey]) {
+        karatTotals[karatKey] = {
+          karat,
+          fillingIn: 0,
+          finishWeight: 0,
+          karigarLoss: 0,
+          fineFillingIn: 0,
+          fineFinishWeight: 0,
+          fineKarigarLoss: 0
+        }
+      }
+
+      const fIn = o.fillingIn || 0
+      const fWeight = o.finishWeight || 0
+      const loss = parseFloat((fIn - fWeight).toFixed(3))
+
+      karatTotals[karatKey].fillingIn += fIn
+      karatTotals[karatKey].finishWeight += fWeight
+      karatTotals[karatKey].karigarLoss += loss
+
+      karatTotals[karatKey].fineFillingIn += fIn * (karat / 100)
+      karatTotals[karatKey].fineFinishWeight += fWeight * (karat / 100)
+      karatTotals[karatKey].fineKarigarLoss += loss * (karat / 100)
+    })
+
+    // Round all values in karatTotals to 3 decimal places
+    Object.keys(karatTotals).forEach((k) => {
+      const kt = karatTotals[k]
+      kt.fillingIn = parseFloat(kt.fillingIn.toFixed(3))
+      kt.finishWeight = parseFloat(kt.finishWeight.toFixed(3))
+      kt.karigarLoss = parseFloat(kt.karigarLoss.toFixed(3))
+      kt.fineFillingIn = parseFloat(kt.fineFillingIn.toFixed(3))
+      kt.fineFinishWeight = parseFloat(kt.fineFinishWeight.toFixed(3))
+      kt.fineKarigarLoss = parseFloat(kt.fineKarigarLoss.toFixed(3))
+    })
+
     console.log(`[${requestId}] Successfully processed ${ordersWithDetails.length} orders`)
 
     const totalPages = Math.ceil(totalCount / limit)
@@ -358,6 +409,7 @@ export async function GET(request: NextRequest) {
       totalCount,
       totalPages,
       totals,
+      karatTotals,
       fillingKarigarLosses,
       fillingKarigarIn,
       settingKarigarLosses,

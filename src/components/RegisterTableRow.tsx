@@ -112,13 +112,7 @@ export default function RegisterTableRow({
         {order.orderName}
       </td>
 
-      {/* Filling Karigar */}
-      <td
-        onClick={!isEditable ? undefined : () => handleCellClick('fillingKarigar', 'Filling Karigar')}
-        className={`px-3 py-2 text-sm text-foreground border-r border-border font-medium ${isEditable ? 'cursor-pointer hover:bg-accent/20' : ''}`}
-      >
-        {order.fillingKarigar || <span className="text-text-light italic">{!isEditable ? '-' : 'Assign...'}</span>}
-      </td>
+
 
       {/* Filling In */}
       <td
@@ -186,10 +180,10 @@ export default function RegisterTableRow({
               onClick={() => onSaveRow(order)}
               disabled={order.status === 'DELIVERED'}
               className={`p-1 rounded transition-colors ${order.status === 'DELIVERED'
-                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                  : order.status === 'COMPLETED'
-                    ? 'bg-indigo-50 text-indigo-600 border border-indigo-100 hover:bg-indigo-100'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                : order.status === 'COMPLETED'
+                  ? 'bg-indigo-50 text-indigo-600 border border-indigo-100 hover:bg-indigo-100'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
                 }`}
               title={order.status === 'COMPLETED' ? 'Saved (Click to Re-save)' : 'Save Order Details (Finalize Weights)'}
             >
@@ -201,8 +195,8 @@ export default function RegisterTableRow({
               onClick={() => onCreateBill(order)}
               disabled={order.status !== 'COMPLETED' && order.status !== 'DELIVERED'}
               className={`p-1 rounded transition-colors ${order.status !== 'COMPLETED' && order.status !== 'DELIVERED'
-                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                  : 'bg-green-600 hover:bg-green-700 text-white'
+                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                : 'bg-green-600 hover:bg-green-700 text-white'
                 }`}
               title={
                 order.status !== 'COMPLETED' && order.status !== 'DELIVERED'

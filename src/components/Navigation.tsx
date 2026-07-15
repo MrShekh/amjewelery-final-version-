@@ -61,12 +61,6 @@ const Navigation = () => {
                 Analytics
               </Link>
               <Link
-                href="/karigars"
-                className={`px-3 py-2 rounded-md text-sm font-medium ${isActive('/karigars')}`}
-              >
-                Karigars
-              </Link>
-              <Link
                 href="/manager"
                 className={`px-3 py-2 rounded-md text-sm font-medium ${isActive('/manager')}`}
               >

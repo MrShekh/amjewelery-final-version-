@@ -88,7 +88,6 @@ export async function GET(request: NextRequest) {
       "Bag Number": order.orderNumber || "",
       "Karat (KT)": order.selectedKarat ? `${order.selectedKarat}%` : "",
       "Order Name": order.orderName || "",
-      "Filling Karigar": order.fillingKarigar || "",
       "Filling In (g)": order.fillingIn || 0,
       "Finish Weight (g)": order.finishWeight || 0,
       "Date": order.createdAt ? new Date(order.createdAt).toLocaleDateString("en-IN") : "",
@@ -100,7 +99,6 @@ export async function GET(request: NextRequest) {
       "Bag Number": "",
       "Karat (KT)": "",
       "Order Name": "TOTAL",
-      "Filling Karigar": "",
       "Filling In (g)": 0,
       "Finish Weight (g)": 0,
       "Date": "",
@@ -129,7 +127,6 @@ export async function GET(request: NextRequest) {
       { wch: 14 }, // Bag Number
       { wch: 10 }, // Karat (KT)
       { wch: 20 }, // Order Name
-      { wch: 16 }, // Filling Karigar
       { wch: 14 }, // Filling In
       { wch: 14 }, // Finish Weight
       { wch: 12 }, // Date

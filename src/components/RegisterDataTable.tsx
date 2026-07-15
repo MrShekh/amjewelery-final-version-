@@ -70,7 +70,6 @@ export default function RegisterDataTable({
     { label: 'KT / Karat', className: 'border-r border-border/20 text-center w-20' },
     { label: 'Bag Number', className: 'border-r border-border/20' },
     { label: 'Order Name', className: 'border-r border-border/20 min-w-[120px]' },
-    { label: 'Filling Karigar', className: 'border-r border-border/20 min-w-[100px]' },
     { label: 'Filling In', className: 'text-right border-r border-border/20' },
     { label: 'Finish Weight', className: 'text-right border-r border-border/20' },
     { label: readOnly ? 'Photo' : 'Photo & Actions', className: `${readOnly ? 'w-16' : 'w-32'} text-center` },
@@ -107,7 +106,7 @@ export default function RegisterDataTable({
               ))
             ) : (
               <tr>
-                <td colSpan={8} className="text-center py-10 text-text-light bg-background/30">
+                <td colSpan={7} className="text-center py-10 text-text-light bg-background/30">
                   No orders found. Create orders from the standard order creation page.
                 </td>
               </tr>
