@@ -46,6 +46,18 @@ const Dashboard = () => {
   const [manualMakingTotal, setManualMakingTotal] = useState<number>(0)
   const [manualMakingLoading, setManualMakingLoading] = useState<boolean>(false)
 
+  // Karigar loss stock state (total / month)
+  const [lossMode, setLossMode] = useState<'total' | 'month'>('total')
+  const [lossMonth, setLossMonth] = useState<string>(() => {
+    const today = new Date()
+    const year = today.getFullYear()
+    const month = String(today.getMonth() + 1).padStart(2, '0')
+    return `${year}-${month}` // YYYY-MM
+  })
+  const [lossTotal, setLossTotal] = useState<number>(0)
+  const [lossLoading, setLossLoading] = useState<boolean>(false)
+  const [clearingLoss, setClearingLoss] = useState<boolean>(false)
+
   // Recovered stock state (day / month)
   const [recoveredMode, setRecoveredMode] = useState<'day' | 'month'>('day')
   const [recoveredDate, setRecoveredDate] = useState<string>(() => {
@@ -170,6 +182,89 @@ const Dashboard = () => {
     fetchRecoveredStock()
   }, [recoveredMode, recoveredDate, recoveredMonth])
 
+  // Fetch monthly karigar loss whenever filter changes
+  useEffect(() => {
+    if (lossMode === 'total') {
+      // Use the value from inventoryData
+      if (inventoryData) {
+        setLossTotal(inventoryData.inventory.karigarLossStock ?? inventoryData.summary.karigarLossStock ?? 0)
+      }
+      return
+    }
+
+    const fetchMonthlyLoss = async () => {
+      try {
+        setLossLoading(true)
+        const sessionToken = localStorage.getItem('sessionToken')
+        const res = await fetch(`/api/reports/karigar-loss?month=${lossMonth}`, {
+          headers: {
+            'Authorization': sessionToken ? `Bearer ${sessionToken}` : ''
+          }
+        })
+
+        if (res.ok) {
+          const data = await res.json()
+          const payload = data.success ? data.data : data
+          setLossTotal(payload.totalLoss || 0)
+        } else {
+          console.error('Failed to fetch monthly karigar loss')
+          setLossTotal(0)
+        }
+      } catch (error) {
+        console.error('Error fetching monthly karigar loss:', error)
+        setLossTotal(0)
+      } finally {
+        setLossLoading(false)
+      }
+    }
+
+    fetchMonthlyLoss()
+  }, [lossMode, lossMonth, inventoryData])
+
+  const handleClearLoss = async () => {
+    if (!confirm('Are you sure you want to clear the total karigar loss? This will reset the displayed total loss to 0.00.')) {
+      return
+    }
+
+    try {
+      setClearingLoss(true)
+      const sessionToken = localStorage.getItem('sessionToken')
+      const res = await fetch('/api/inventory/clear-karigar-loss', {
+        method: 'POST',
+        headers: {
+          'Authorization': sessionToken ? `Bearer ${sessionToken}` : ''
+        }
+      })
+
+      if (res.ok) {
+        // Refresh inventory data
+        const inventoryRes = await fetch('/api/inventory', {
+          headers: {
+            'Authorization': sessionToken ? `Bearer ${sessionToken}` : ''
+          }
+        })
+
+        if (inventoryRes.ok) {
+          const inventory = await inventoryRes.json()
+          if (inventory.success) {
+            setInventoryData(inventory.data)
+          } else {
+            setInventoryData(inventory)
+          }
+        }
+        alert('Karigar total loss cleared successfully!')
+      } else {
+        const data = await res.json()
+        alert(data.error || 'Failed to clear karigar loss')
+      }
+    } catch (error) {
+      console.error('Error clearing karigar loss:', error)
+      alert('Failed to clear karigar loss')
+    } finally {
+      setClearingLoss(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -190,14 +285,79 @@ const Dashboard = () => {
 
       {/* Stock Summary - Karigar Loss, Customer Stock, Recovered Stock, Manual Making Charge */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        {/* Karigar Total Loss Card */}
         <div className="bg-gradient-to-r from-blue-400 to-blue-600 p-6 rounded-lg text-white">
-          <h3 className="text-sm font-medium text-blue-100 uppercase tracking-wide">
-            Karigar Total Loss
-          </h3>
-          <p className="mt-2 text-3xl font-bold">
-            {(inventoryData?.inventory.karigarLossStock ?? inventoryData?.summary.karigarLossStock ?? 0).toFixed(3)}g
-          </p>
-          <p className="text-xs text-blue-100 mt-1">Total loss accumulated (Filing In - Finish Weight)</p>
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-sm font-medium text-blue-100 uppercase tracking-wide">
+                  Karigar Loss
+                </h3>
+                <span className="text-[10px] bg-white/10 px-2 py-0.5 rounded-full">
+                  {lossMode === 'total' ? 'Total' : 'Monthly'}
+                </span>
+              </div>
+              <p className="mt-2 text-3xl font-bold">
+                {lossLoading ? '...' : `${lossTotal.toFixed(3)}g`}
+              </p>
+              <p className="text-xs text-blue-100 mt-1">
+                {lossMode === 'total'
+                  ? 'Total loss accumulated (Filing In - Finish Weight)'
+                  : (() => {
+                    const safeMonth = lossMonth || new Date().toISOString().slice(0, 7)
+                    const d = new Date(safeMonth + '-01')
+                    return `Total loss in ${d.toLocaleString('en-IN', {
+                      month: 'long',
+                      year: 'numeric'
+                    })}`
+                  })()}
+              </p>
+
+              {lossMode === 'total' && (
+                <button
+                  type="button"
+                  onClick={handleClearLoss}
+                  disabled={clearingLoss}
+                  className="mt-3 bg-white text-blue-700 hover:bg-blue-50 disabled:bg-blue-200 px-3 py-1 rounded text-xs font-semibold transition-colors flex items-center space-x-1"
+                >
+                  <span>{clearingLoss ? 'Clearing...' : 'Clear Total Loss'}</span>
+                </button>
+              )}
+            </div>
+
+            <div className="ml-4 flex flex-col items-end space-y-2">
+              <div className="flex space-x-1 text-[10px] bg-white/10 rounded-full p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setLossMode('total')}
+                  className={`px-2 py-0.5 rounded-full ${lossMode === 'total' ? 'bg-white text-blue-700' : 'text-blue-100'
+                    }`}
+                >
+                  Total
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLossMode('month')}
+                  className={`px-2 py-0.5 rounded-full ${lossMode === 'month' ? 'bg-white text-blue-700' : 'text-blue-100'
+                    }`}
+                >
+                  Month
+                </button>
+              </div>
+
+              {lossMode === 'month' && (
+                <div>
+                  <label className="block text-[10px] font-medium text-blue-100 mb-1">Month</label>
+                  <input
+                    type="month"
+                    value={lossMonth}
+                    onChange={(e) => setLossMonth(e.target.value)}
+                    className="px-2 py-1 rounded bg-white/10 text-xs text-white border border-blue-200 focus:outline-none focus:ring-1 focus:ring-white"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="bg-gradient-to-r from-orange-400 to-red-500 p-6 rounded-lg text-white">

@@ -132,7 +132,8 @@ export async function GET(request: NextRequest) {
       const fWeight = o.finishWeight || 0
       calculatedKarigarLossStock += Math.max(0, fIn - fWeight)
     })
-    const karigarLossStock = parseFloat(calculatedKarigarLossStock.toFixed(3))
+    const karigarLossClearedAmount = inventory.karigarLossClearedAmount || 0
+    const karigarLossStock = parseFloat(Math.max(0, calculatedKarigarLossStock - karigarLossClearedAmount).toFixed(3))
     const recoveredStock = inventory.recoveredStock || 0
 
     // Return only what dashboard needs: inventory snapshot + simple summary

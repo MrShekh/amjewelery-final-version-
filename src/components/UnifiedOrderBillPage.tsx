@@ -52,6 +52,7 @@ const UnifiedOrderBillPage: React.FC<UnifiedOrderBillPageProps> = ({ orderId }) 
 
   // Form data state
   const [billData, setBillData] = useState({
+    finishWeight: '0', // Added: manual entry for finish weight (total weight)
     netWeight: '0', // Added: manual entry for net gold weight
     manufacturingCostGrams: '0', // No longer used but kept for API compatibility
     makingCharge: '4', // NEW: Making charge dropdown value (3, 3.5, 4, etc.)
@@ -99,9 +100,10 @@ const UnifiedOrderBillPage: React.FC<UnifiedOrderBillPageProps> = ({ orderId }) 
         const orderData = data.order
         setOrder(orderData)
 
-        // Auto-populate net weight and advance gold if available
+        // Auto-populate net weight, finish weight and advance gold if available
         setBillData(prev => ({
           ...prev,
+          finishWeight: (orderData?.actualFinalWeight || 0).toString(),
           netWeight: (orderData?.actualGoldWeight || 0).toString(),
           advanceGoldUsed: orderData?.customerAdvanceGold ? orderData.customerAdvanceGold.toString() : prev.advanceGoldUsed
         }))
@@ -185,7 +187,7 @@ const UnifiedOrderBillPage: React.FC<UnifiedOrderBillPageProps> = ({ orderId }) 
 
     const actualGoldWeight = parseFloat(billData.netWeight) || 0
     const totalStoneWeight = order.totalStoneWeight || 0
-    const actualFinalWeight = actualGoldWeight + totalStoneWeight
+    const actualFinalWeight = parseFloat(billData.finishWeight) || (actualGoldWeight + totalStoneWeight)
     const selectedKarat = order.selectedKarat || 92
     const makingCharge = parseFloat(billData.makingCharge) || 0
     const karatPurity = (selectedKarat + makingCharge) / 100 // Add making charge to karat purity
@@ -510,23 +512,63 @@ const UnifiedOrderBillPage: React.FC<UnifiedOrderBillPageProps> = ({ orderId }) 
                 <h4 className="text-lg font-semibold text-blue-900 mb-4">⚖️ Select Base Weight for Billing</h4>
                 <p className="text-sm text-gray-600 mb-4">Choose which weight you want to use as the base for billing, then adjust stones as needed:</p>
 
-                {/* Net Weight Manual Input Field */}
-                <div className="mb-6">
-                  <label className="block text-sm font-semibold text-gray-800 mb-2">
-                    Net Weight (grams) *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    required
-                    value={billData.netWeight}
-                    onChange={(e) => setBillData({ ...billData, netWeight: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 font-bold text-gray-900"
-                    placeholder="0.000"
-                  />
-                  <p className="text-xs text-blue-600 mt-1">
-                    💡 Order gold weight is {(order?.actualGoldWeight || 0).toFixed(3)}g (Type to edit manually)
-                  </p>
+                {/* Finish Weight & Net Weight Manual Input Fields */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-800 mb-2">
+                      Finish Weight (grams) *
+                    </label>
+                    <input
+                      type="number"
+                      step="0.001"
+                      required
+                      value={billData.finishWeight}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        const totalStoneWeight = order?.totalStoneWeight || 0
+                        const fWeight = parseFloat(val) || 0
+                        const nWeight = Math.max(0, fWeight - totalStoneWeight)
+                        setBillData(prev => ({
+                          ...prev,
+                          finishWeight: val,
+                          netWeight: nWeight.toString()
+                        }))
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 font-bold text-gray-900"
+                      placeholder="0.000"
+                    />
+                    <p className="text-xs text-blue-600 mt-1">
+                      💡 Order final weight is {(order?.actualFinalWeight || 0).toFixed(3)}g (Type to edit manually)
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-800 mb-2">
+                      Net Weight (grams) *
+                    </label>
+                    <input
+                      type="number"
+                      step="0.001"
+                      required
+                      value={billData.netWeight}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        const totalStoneWeight = order?.totalStoneWeight || 0
+                        const nWeight = parseFloat(val) || 0
+                        const fWeight = nWeight + totalStoneWeight
+                        setBillData(prev => ({
+                          ...prev,
+                          netWeight: val,
+                          finishWeight: fWeight.toString()
+                        }))
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 font-bold text-gray-900"
+                      placeholder="0.000"
+                    />
+                    <p className="text-xs text-blue-600 mt-1">
+                      💡 Order gold weight is {(order?.actualGoldWeight || 0).toFixed(3)}g (Type to edit manually)
+                    </p>
+                  </div>
                 </div>
 
                 {/* Base Weight Selection */}
