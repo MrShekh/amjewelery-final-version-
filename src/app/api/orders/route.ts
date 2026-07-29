@@ -22,6 +22,7 @@ export async function GET(request: NextRequest) {
   const search = searchParams.get('search') || ''
   const dateFilter = searchParams.get('dateFilter') || 'all'
   const karatFilter = searchParams.get('karatFilter') || 'all'
+  const clearedAfter = searchParams.get('clearedAfter') // ISO timestamp — analytics clear boundary
 
   const page = Math.max(parseInt(pageParam, 10) || 1, 1)
   const limit = Math.max(Math.min(parseInt(limitParam, 10) || 10, 100), 1)
@@ -139,6 +140,21 @@ export async function GET(request: NextRequest) {
 
       if (startDate) {
         filter.createdAt = { $gte: startDate }
+      }
+    }
+
+    // Apply clearedAfter boundary (analytics reset): only count orders after this date
+    if (clearedAfter) {
+      const clearedAfterDate = new Date(clearedAfter)
+      if (!isNaN(clearedAfterDate.getTime())) {
+        // If there is already a $gte from dateFilter, take the LATER of the two
+        if (filter.createdAt && filter.createdAt.$gte) {
+          if (clearedAfterDate > filter.createdAt.$gte) {
+            filter.createdAt.$gte = clearedAfterDate
+          }
+        } else {
+          filter.createdAt = { ...filter.createdAt, $gte: clearedAfterDate }
+        }
       }
     }
 

@@ -90,6 +90,11 @@ export async function getRecoveryHistoryCollection() {
   return db.collection('recoveryHistory')
 }
 
+export async function getAnalyticsSnapshotsCollection() {
+  const db = await getDb()
+  return db.collection('analyticsSnapshots')
+}
+
 // Helper function for backward compatibility
 export async function connectToDatabase() {
   const db = await getDb()

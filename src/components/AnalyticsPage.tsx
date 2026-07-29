@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Scale, Calendar, Filter, Hammer, BarChart3, TrendingDown } from 'lucide-react'
+import { Scale, Calendar, Filter, BarChart3, Download, Trash2, Info } from 'lucide-react'
+import * as XLSX from 'xlsx'
 
 interface KaratTotalItem {
   karat: number
@@ -41,22 +42,51 @@ export default function AnalyticsPage() {
   const [karatFilter, setKaratFilter] = useState('all')
   const [loading, setLoading] = useState(false)
 
+  // ─── Analytics snapshot (clear date) ────────────────────────────────────────
+  const [clearedAt, setClearedAt] = useState<string | null>(null)
+  const [snapshotLoading, setSnapshotLoading] = useState(false)
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  // ── Fetch clear date from server ───────────────────────────────────────────
+  const fetchSnapshot = useCallback(async () => {
+    try {
+      const sessionToken = localStorage.getItem('sessionToken')
+      const res = await fetch('/api/analytics/snapshot', {
+        headers: { Authorization: sessionToken ? `Bearer ${sessionToken}` : '' },
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setClearedAt(data.clearedAt ?? null)
+      }
+    } catch (err) {
+      console.error('Failed to fetch analytics snapshot', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchSnapshot()
+  }, [fetchSnapshot])
+
+  // ── Main data fetch ────────────────────────────────────────────────────────
   const fetchAnalytics = useCallback(async () => {
     setLoading(true)
     try {
       const sessionToken = localStorage.getItem('sessionToken')
 
-      // Fetch today, month, and filtered data in parallel
+      // Build clearedAfter param
+      const clearedParam = clearedAt ? `&clearedAfter=${encodeURIComponent(clearedAt)}` : ''
+
       const [todayRes, monthRes, filteredRes] = await Promise.all([
-        fetch(`/api/orders?dateFilter=today&limit=1`, {
-          headers: { 'Authorization': sessionToken ? `Bearer ${sessionToken}` : '' }
+        fetch(`/api/orders?dateFilter=today&limit=1${clearedParam}`, {
+          headers: { Authorization: sessionToken ? `Bearer ${sessionToken}` : '' },
         }),
-        fetch(`/api/orders?dateFilter=month&limit=1`, {
-          headers: { 'Authorization': sessionToken ? `Bearer ${sessionToken}` : '' }
+        fetch(`/api/orders?dateFilter=month&limit=1${clearedParam}`, {
+          headers: { Authorization: sessionToken ? `Bearer ${sessionToken}` : '' },
         }),
-        fetch(`/api/orders?dateFilter=${dateFilter}&karatFilter=${karatFilter}&limit=1`, {
-          headers: { 'Authorization': sessionToken ? `Bearer ${sessionToken}` : '' }
-        })
+        fetch(`/api/orders?dateFilter=${dateFilter}&karatFilter=${karatFilter}&limit=1${clearedParam}`, {
+          headers: { Authorization: sessionToken ? `Bearer ${sessionToken}` : '' },
+        }),
       ])
 
       const todayData = await todayRes.json()
@@ -84,11 +114,148 @@ export default function AnalyticsPage() {
     } finally {
       setLoading(false)
     }
-  }, [dateFilter, karatFilter])
+  }, [dateFilter, karatFilter, clearedAt])
 
   useEffect(() => {
     fetchAnalytics()
   }, [fetchAnalytics])
+
+  // ─── Save snapshot to local device (Excel) ────────────────────────────────
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const dateStr = new Date().toLocaleDateString('en-IN').replace(/\//g, '-')
+      const timeStr = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+
+      // Header rows
+      const titleRow = [`AM Jewellers — Production Analytics Snapshot`]
+      const subtitleRow = [`Saved on: ${dateStr} at ${timeStr}`]
+      const clearedRow = clearedAt
+        ? [`Analytics period started from: ${new Date(clearedAt).toLocaleString('en-IN')}`]
+        : [`Analytics period: All time`]
+      const blank: string[] = []
+
+      // Summary rows
+      const summaryHeader = ['Section', 'Filling In (g)', 'Finish Weight (g)', 'Karigar Loss (g)']
+      const todaySummary = ["Today's Summary", todayFillingIn.toFixed(3), todayFinishWeight.toFixed(3), todayKarigarLoss.toFixed(3)]
+      const monthSummary = ["This Month's Summary", monthFillingIn.toFixed(3), monthFinishWeight.toFixed(3), monthKarigarLoss.toFixed(3)]
+      const filteredSummary = ['Filtered Summary', filteredTotalFillingIn.toFixed(3), filteredFinishWeight.toFixed(3), filteredKarigarLoss.toFixed(3)]
+
+      const blank2: string[] = []
+      // Karat table header
+      const tableHeader = [
+        'Karat',
+        'Filling In Karat Wt (g)',
+        'Filling In Fine Wt (g)',
+        'Finish Weight Karat Wt (g)',
+        'Finish Weight Fine Wt (g)',
+        'Karigar Loss Karat Wt (g)',
+        'Karigar Loss Fine Wt (g)',
+      ]
+
+      const tableRows = Object.keys(karatTotals)
+        .sort((a, b) => parseFloat(b) - parseFloat(a))
+        .map((k) => {
+          const item = karatTotals[k]
+          return [
+            getKaratLabel(item.karat),
+            item.fillingIn.toFixed(3),
+            item.fineFillingIn.toFixed(3),
+            item.finishWeight.toFixed(3),
+            item.fineFinishWeight.toFixed(3),
+            item.karigarLoss.toFixed(3),
+            item.fineKarigarLoss.toFixed(3),
+          ]
+        })
+
+      const gTotals = Object.values(karatTotals).reduce(
+        (acc, curr) => {
+          acc.fillingIn += curr.fillingIn
+          acc.fineFillingIn += curr.fineFillingIn
+          acc.finishWeight += curr.finishWeight
+          acc.fineFinishWeight += curr.fineFinishWeight
+          acc.karigarLoss += curr.karigarLoss
+          acc.fineKarigarLoss += curr.fineKarigarLoss
+          return acc
+        },
+        { fillingIn: 0, fineFillingIn: 0, finishWeight: 0, fineFinishWeight: 0, karigarLoss: 0, fineKarigarLoss: 0 }
+      )
+
+      const totalsRow = [
+        'GRAND TOTAL',
+        gTotals.fillingIn.toFixed(3),
+        gTotals.fineFillingIn.toFixed(3),
+        gTotals.finishWeight.toFixed(3),
+        gTotals.fineFinishWeight.toFixed(3),
+        gTotals.karigarLoss.toFixed(3),
+        gTotals.fineKarigarLoss.toFixed(3),
+      ]
+
+      const wsData = [
+        titleRow,
+        subtitleRow,
+        clearedRow,
+        blank,
+        summaryHeader,
+        todaySummary,
+        monthSummary,
+        filteredSummary,
+        blank2,
+        tableHeader,
+        ...tableRows,
+        blank,
+        totalsRow,
+      ]
+
+      const ws = XLSX.utils.aoa_to_sheet(wsData)
+      ws['!cols'] = [
+        { wch: 28 }, { wch: 22 }, { wch: 22 }, { wch: 26 }, { wch: 26 }, { wch: 26 }, { wch: 26 },
+      ]
+
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'Analytics Snapshot')
+      XLSX.writeFile(wb, `Analytics_Snapshot_${dateStr}.xlsx`)
+    } catch (err) {
+      console.error('Save error:', err)
+      alert('Failed to save analytics snapshot.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // ─── Clear analytics (save snapshot then reset) ───────────────────────────
+  const handleClear = async () => {
+    setShowClearConfirm(false)
+    setSnapshotLoading(true)
+    try {
+      // 1. Auto-save first (so data isn't lost)
+      await handleSave()
+
+      // 2. Record new clearedAt on server
+      const sessionToken = localStorage.getItem('sessionToken')
+      const res = await fetch('/api/analytics/snapshot', {
+        method: 'POST',
+        headers: {
+          Authorization: sessionToken ? `Bearer ${sessionToken}` : '',
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!res.ok) {
+        const err = await res.json()
+        alert(`Failed to clear analytics: ${err.error}`)
+        return
+      }
+
+      const data = await res.json()
+      setClearedAt(data.clearedAt)
+    } catch (err) {
+      console.error('Clear error:', err)
+      alert('Failed to clear analytics. Please try again.')
+    } finally {
+      setSnapshotLoading(false)
+    }
+  }
 
   const getKaratLabel = (karat: number | string): string => {
     const num = typeof karat === 'string' ? parseFloat(karat) : karat
@@ -123,20 +290,129 @@ export default function AnalyticsPage() {
     fineKarigarLoss: 0
   })
 
+  const isBusy = snapshotLoading || saving
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto p-4 sm:p-6">
       {/* Page Title */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex items-center justify-between">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Production Analytics</h1>
           <p className="text-gray-500 text-sm mt-1">
             Review gold issued, finished weights, and total loss across different purities.
           </p>
+          {clearedAt && (
+            <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+              <Info className="w-3 h-3 inline" />
+              Showing data since: {new Date(clearedAt).toLocaleString('en-IN')}
+            </p>
+          )}
         </div>
-        <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
-          <BarChart3 className="w-6 h-6" />
+
+        {/* ── Save & Clear Buttons ── */}
+        <div className="flex items-center gap-3 flex-shrink-0">
+          {/* Save Button */}
+          <button
+            id="analytics-save-btn"
+            onClick={handleSave}
+            disabled={isBusy}
+            title="Save current analytics as Excel file to your device"
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors ${isBusy
+                ? 'bg-blue-200 text-white cursor-not-allowed'
+                : 'bg-blue-600 hover:bg-blue-700 text-white'
+              }`}
+          >
+            {saving ? (
+              <>
+                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Saving…
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4" />
+                Save Analytics
+              </>
+            )}
+          </button>
+
+          {/* Clear Button */}
+          <button
+            id="analytics-clear-btn"
+            onClick={() => setShowClearConfirm(true)}
+            disabled={isBusy}
+            title="Save current analytics to Excel, then reset analytics to 0 from now"
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors ${isBusy
+                ? 'bg-red-200 text-white cursor-not-allowed'
+                : 'bg-red-600 hover:bg-red-700 text-white'
+              }`}
+          >
+            {snapshotLoading ? (
+              <>
+                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Clearing…
+              </>
+            ) : (
+              <>
+                <Trash2 className="w-4 h-4" />
+                Save &amp; Clear
+              </>
+            )}
+          </button>
+
+          <div className="p-3 bg-blue-50 text-blue-600 rounded-xl hidden sm:block">
+            <BarChart3 className="w-6 h-6" />
+          </div>
         </div>
       </div>
+
+      {/* ── Clear Confirmation Modal ── */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-red-100 text-red-600 rounded-xl">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Save &amp; Clear Analytics?</h3>
+                <p className="text-sm text-gray-500">This action cannot be undone.</p>
+              </div>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 space-y-1">
+              <p className="font-semibold">What will happen:</p>
+              <ul className="list-disc list-inside space-y-1 text-amber-700">
+                <li>Current analytics data will be <strong>saved as an Excel file</strong> to your device automatically</li>
+                <li>Analytics will <strong>reset to 0.000 g</strong> from this moment</li>
+                <li>Only <strong>new orders</strong> created after this point will count in analytics</li>
+                <li>Old orders are <strong>not deleted</strong> — they are just excluded from the view</li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3 justify-end pt-2">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClear}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                Yes, Save &amp; Clear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -144,7 +420,7 @@ export default function AnalyticsPage() {
         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow">
           <div>
             <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-4 border-b pb-2">
-              Today's Summary
+              Today&apos;s Summary
             </span>
             <div className="space-y-3.5">
               <div className="flex justify-between items-center">
@@ -167,7 +443,7 @@ export default function AnalyticsPage() {
         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow">
           <div>
             <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-4 border-b pb-2">
-              This Month's Summary
+              This Month&apos;s Summary
             </span>
             <div className="space-y-3.5">
               <div className="flex justify-between items-center">
@@ -267,7 +543,7 @@ export default function AnalyticsPage() {
           <div className="p-5 border-b border-gray-100 flex items-center justify-between">
             <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
               <Scale className="w-5 h-5 text-blue-600" />
-              Karat & Fine Weight Analytics Summary
+              Karat &amp; Fine Weight Analytics Summary
             </h3>
           </div>
           <div className="overflow-x-auto">
