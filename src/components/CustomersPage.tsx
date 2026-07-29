@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import * as XLSX from 'xlsx'
 
 interface Customer {
   id: string
@@ -32,6 +33,7 @@ const CustomersPage = () => {
   const [initialLoading, setInitialLoading] = useState(true)
   const [tableLoading, setTableLoading] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [downloading, setDownloading] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -45,6 +47,89 @@ const CustomersPage = () => {
     email: '',
     address: ''
   })
+
+  // ── Download Balance Sheet ────────────────────────────────────────────────
+  const downloadBalanceSheet = async () => {
+    setDownloading(true)
+    try {
+      const sessionToken = localStorage.getItem('sessionToken')
+      const res = await fetch('/api/customers/balance-report', {
+        headers: { Authorization: sessionToken ? `Bearer ${sessionToken}` : '' },
+      })
+
+      if (!res.ok) {
+        const err = await res.json()
+        alert(`Failed to fetch data: ${err.error || res.statusText}`)
+        return
+      }
+
+      const { rows, totals } = await res.json()
+
+      // ── Build worksheet data ────────────────────────────────────────────
+      const header = [
+        'Sr. No.',
+        'Customer Name',
+        'Phone',
+        'Total Gold Owed / Jama (g)',
+        'Net Pending Gold (g)',
+      ]
+
+      const dataRows = (rows as Array<{
+        name: string
+        phone: string
+        totalJamaGold: number
+        netPendingGold: number
+      }>).map((r, i) => [
+        i + 1,
+        r.name,
+        r.phone || '-',
+        r.totalJamaGold,
+        r.netPendingGold,
+      ])
+
+      // Totals row
+      const totalsRow = [
+        '',
+        'GRAND TOTAL',
+        '',
+        totals.grandTotalJamaGold,
+        totals.grandNetPendingGold,
+      ]
+
+      const wsData = [header, ...dataRows, [], totalsRow]
+
+      const ws = XLSX.utils.aoa_to_sheet(wsData)
+
+      // Column widths
+      ws['!cols'] = [
+        { wch: 8 },
+        { wch: 28 },
+        { wch: 16 },
+        { wch: 28 },
+        { wch: 24 },
+      ]
+
+      // Style the header row bold (basic)
+      const headerRange = XLSX.utils.decode_range(ws['!ref'] || 'A1')
+      for (let c = headerRange.s.c; c <= headerRange.e.c; c++) {
+        const cell = ws[XLSX.utils.encode_cell({ r: 0, c })]
+        if (cell) {
+          cell.s = { font: { bold: true }, fill: { fgColor: { rgb: 'D4AF37' } } }
+        }
+      }
+
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'Customer Balances')
+
+      const dateStr = new Date().toLocaleDateString('en-IN').replace(/\//g, '-')
+      XLSX.writeFile(wb, `Customer_Balance_Sheet_${dateStr}.xlsx`)
+    } catch (err) {
+      console.error('Download error:', err)
+      alert('Failed to download balance sheet. Please try again.')
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   const fetchCustomers = async (page = 1, search = '') => {
     try {
@@ -203,12 +288,42 @@ const CustomersPage = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">Customers</h1>
-        <button
-          onClick={() => setShowModal(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium"
-        >
-          Add Customer
-        </button>
+        <div className="flex items-center space-x-3">
+          {/* ── Download Balance Sheet Button ── */}
+          <button
+            onClick={downloadBalanceSheet}
+            disabled={downloading}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition-colors ${downloading
+                ? 'bg-green-300 text-white cursor-not-allowed'
+                : 'bg-green-600 hover:bg-green-700 text-white'
+              }`}
+            title="Download all customer gold balance data as Excel"
+          >
+            {downloading ? (
+              <>
+                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                <span>Downloading…</span>
+              </>
+            ) : (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+                </svg>
+                <span>Download Balance Sheet</span>
+              </>
+            )}
+          </button>
+
+          <button
+            onClick={() => setShowModal(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium"
+          >
+            Add Customer
+          </button>
+        </div>
       </div>
 
       {/* Search Bar and Statistics */}
