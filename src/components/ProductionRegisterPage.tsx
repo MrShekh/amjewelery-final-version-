@@ -328,11 +328,11 @@ export default function ProductionRegisterPage() {
     }
   }
 
-  // Generate Excel-like month tabs dynamically: past 6 months in chronological order
   const monthTabs = [
     { label: 'All Time', value: 'all' },
     ...Array.from({ length: 6 }, (_, i) => {
       const d = new Date()
+      d.setDate(1) // Prevent month rollover on 29th-31st
       d.setMonth(d.getMonth() - (5 - i))
       return {
         label: d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }),

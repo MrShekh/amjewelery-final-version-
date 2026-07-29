@@ -69,8 +69,7 @@ export async function GET(request: NextRequest) {
           startDate.setDate(now.getDate() - 7)
           break
         case 'month':
-          startDate = new Date(now)
-          startDate.setMonth(now.getMonth() - 1)
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1)
           break
       }
 
