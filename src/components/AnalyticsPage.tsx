@@ -78,13 +78,13 @@ export default function AnalyticsPage() {
       const clearedParam = clearedAt ? `&clearedAfter=${encodeURIComponent(clearedAt)}` : ''
 
       const [todayRes, monthRes, filteredRes] = await Promise.all([
-        fetch(`/api/orders?dateFilter=today&limit=1${clearedParam}`, {
+        fetch(`/api/orders?dateFilter=today&limit=1&forAnalytics=true${clearedParam}`, {
           headers: { Authorization: sessionToken ? `Bearer ${sessionToken}` : '' },
         }),
-        fetch(`/api/orders?dateFilter=month&limit=1${clearedParam}`, {
+        fetch(`/api/orders?dateFilter=month&limit=1&forAnalytics=true${clearedParam}`, {
           headers: { Authorization: sessionToken ? `Bearer ${sessionToken}` : '' },
         }),
-        fetch(`/api/orders?dateFilter=${dateFilter}&karatFilter=${karatFilter}&limit=1${clearedParam}`, {
+        fetch(`/api/orders?dateFilter=${dateFilter}&karatFilter=${karatFilter}&limit=1&forAnalytics=true${clearedParam}`, {
           headers: { Authorization: sessionToken ? `Bearer ${sessionToken}` : '' },
         }),
       ])
@@ -318,8 +318,8 @@ export default function AnalyticsPage() {
             disabled={isBusy}
             title="Save current analytics as Excel file to your device"
             className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors ${isBusy
-                ? 'bg-blue-200 text-white cursor-not-allowed'
-                : 'bg-blue-600 hover:bg-blue-700 text-white'
+              ? 'bg-blue-200 text-white cursor-not-allowed'
+              : 'bg-blue-600 hover:bg-blue-700 text-white'
               }`}
           >
             {saving ? (
@@ -345,8 +345,8 @@ export default function AnalyticsPage() {
             disabled={isBusy}
             title="Save current analytics to Excel, then reset analytics to 0 from now"
             className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors ${isBusy
-                ? 'bg-red-200 text-white cursor-not-allowed'
-                : 'bg-red-600 hover:bg-red-700 text-white'
+              ? 'bg-red-200 text-white cursor-not-allowed'
+              : 'bg-red-600 hover:bg-red-700 text-white'
               }`}
           >
             {snapshotLoading ? (

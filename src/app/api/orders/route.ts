@@ -112,14 +112,17 @@ export async function GET(request: NextRequest) {
     }
 
     // Apply date or month filter
+    const forAnalytics = searchParams.get('forAnalytics') === 'true'
     const monthFilter = searchParams.get('monthFilter')
+    const dateField = forAnalytics ? 'updatedAt' : 'createdAt'
+
     if (monthFilter && monthFilter !== 'all') {
       const [yearStr, monthStr] = monthFilter.split('-')
       const year = Number(yearStr)
       const month = Number(monthStr) || 1
       const startDate = new Date(Date.UTC(year, month - 1, 1, -5, -30))
       const endDate = new Date(Date.UTC(year, month, 1, -5, -30))
-      filter.createdAt = { $gte: startDate, $lt: endDate }
+      filter[dateField] = { $gte: startDate, $lt: endDate }
     } else if (dateFilter !== 'all') {
       const now = new Date()
       let startDate: Date | null = null
@@ -138,7 +141,7 @@ export async function GET(request: NextRequest) {
       }
 
       if (startDate) {
-        filter.createdAt = { $gte: startDate }
+        filter[dateField] = { $gte: startDate }
       }
     }
 
@@ -147,12 +150,12 @@ export async function GET(request: NextRequest) {
       const clearedAfterDate = new Date(clearedAfter)
       if (!isNaN(clearedAfterDate.getTime())) {
         // If there is already a $gte from dateFilter, take the LATER of the two
-        if (filter.createdAt && filter.createdAt.$gte) {
-          if (clearedAfterDate > filter.createdAt.$gte) {
-            filter.createdAt.$gte = clearedAfterDate
+        if (filter[dateField] && filter[dateField].$gte) {
+          if (clearedAfterDate > filter[dateField].$gte) {
+            filter[dateField].$gte = clearedAfterDate
           }
         } else {
-          filter.createdAt = { ...filter.createdAt, $gte: clearedAfterDate }
+          filter[dateField] = { ...filter[dateField], $gte: clearedAfterDate }
         }
       }
     }
