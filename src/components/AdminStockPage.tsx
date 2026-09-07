@@ -9,7 +9,7 @@ interface AdminGoldEntry {
     date: Date | string
     karat: number
     weight: number // signed: positive = added, negative = removed
-    type: 'MANUAL' | 'ORDER_COMPLETE' | 'ORDER_FILLING' | 'ORDER_DELETED' | 'KARIGAR_LOSS_RECOVERED' | 'CUSTOMER_GOLD_RECOVERED'
+    type: 'MANUAL' | 'ORDER_COMPLETE' | 'ORDER_FILLING' | 'ORDER_DELETED' | 'KARIGAR_LOSS_RECOVERED' | 'CUSTOMER_GOLD_RECOVERED' | 'FINE_TO_KARAT'
     description?: string
     orderId?: string
     createdAt: Date | string
@@ -37,7 +37,8 @@ const ENTRY_TYPE_LABELS: Record<AdminGoldEntry['type'], string> = {
     ORDER_FILLING: 'Filling In (Order)',
     ORDER_DELETED: 'Order Deleted (Returned)',
     KARIGAR_LOSS_RECOVERED: 'Recovered from Karigar Loss',
-    CUSTOMER_GOLD_RECOVERED: 'Recovered from Customer'
+    CUSTOMER_GOLD_RECOVERED: 'Recovered from Customer',
+    FINE_TO_KARAT: 'Fine → Karat Conversion'
 }
 
 const KARAT_OPTIONS = [92, 88, 84, 80, 76, 75.5, 75, 59, 37.5]
@@ -47,6 +48,7 @@ const AdminStockPage = () => {
     const [adminStock, setAdminStock] = useState<AdminGoldStock | null>(null)
     const [loading, setLoading] = useState(true)
     const [showAddForm, setShowAddForm] = useState(false)
+    const [showConvertForm, setShowConvertForm] = useState(false)
 
     const [formDate, setFormDate] = useState(() => new Date().toISOString().split('T')[0])
     const [formKarat, setFormKarat] = useState<number>(92)
@@ -54,6 +56,12 @@ const AdminStockPage = () => {
     const [formDirection, setFormDirection] = useState<'ADD' | 'REMOVE'>('ADD')
     const [formDescription, setFormDescription] = useState<string>('')
     const [submitting, setSubmitting] = useState(false)
+
+    const [convertDate, setConvertDate] = useState(() => new Date().toISOString().split('T')[0])
+    const [convertKarat, setConvertKarat] = useState<number>(92)
+    const [convertFineAmount, setConvertFineAmount] = useState<string>('')
+    const [convertDescription, setConvertDescription] = useState<string>('')
+    const [converting, setConverting] = useState(false)
 
     const fetchAdminStock = async () => {
         try {
@@ -126,6 +134,51 @@ const AdminStockPage = () => {
         }
     }
 
+    const handleConvertFineToKarat = async (e: React.FormEvent) => {
+        e.preventDefault()
+
+        if (!convertFineAmount || parseFloat(convertFineAmount) <= 0) {
+            alert('Please enter a valid Fine amount to convert')
+            return
+        }
+
+        try {
+            setConverting(true)
+            const token = localStorage.getItem('sessionToken')
+
+            const response = await fetch('/api/admin-stock/convert', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    date: convertDate,
+                    karat: convertKarat,
+                    fineAmount: parseFloat(convertFineAmount),
+                    description: convertDescription
+                })
+            })
+
+            if (response.ok) {
+                const data = await response.json()
+                setConvertFineAmount('')
+                setConvertDescription('')
+                setShowConvertForm(false)
+                fetchAdminStock()
+                alert(data.message)
+            } else {
+                const error = await response.json()
+                alert(`Failed to convert: ${error.error}`)
+            }
+        } catch (error) {
+            console.error('Error converting fine to karat:', error)
+            alert('Failed to convert fine gold')
+        } finally {
+            setConverting(false)
+        }
+    }
+
     const getBreakdown = (karat: number): KaratBreakdownItem => {
         return adminStock?.breakdown.find(b => b.karat === karat) || { karat, weight: 0, fine: 0 }
     }
@@ -150,12 +203,20 @@ const AdminStockPage = () => {
                     <h1 className="text-3xl font-bold text-gray-900">Admin Stock</h1>
                     <p className="text-gray-600 mt-1">Karat-wise gold on hand, converted to fine gold</p>
                 </div>
-                <button
-                    onClick={() => setShowAddForm(!showAddForm)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium"
-                >
-                    {showAddForm ? 'Cancel' : 'Add / Remove Gold'}
-                </button>
+                <div className="flex gap-3">
+                    <button
+                        onClick={() => { setShowConvertForm(false); setShowAddForm(!showAddForm) }}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium"
+                    >
+                        {showAddForm ? 'Cancel' : 'Add / Remove Gold'}
+                    </button>
+                    <button
+                        onClick={() => { setShowAddForm(false); setShowConvertForm(!showConvertForm) }}
+                        className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-medium"
+                    >
+                        {showConvertForm ? 'Cancel' : 'Convert Fine → Karat'}
+                    </button>
+                </div>
             </div>
 
             {/* Fine Total */}
@@ -247,6 +308,80 @@ const AdminStockPage = () => {
                 </div>
             )}
 
+            {/* Convert Fine to Karat Form */}
+            {showConvertForm && (
+                <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
+                    <h2 className="text-xl font-semibold text-gray-900 mb-1">Convert Fine Gold to Karat</h2>
+                    <p className="text-sm text-gray-500 mb-4">
+                        Alloys pure Fine Gold down to a specific karat. Fine Stock goes down by the amount you convert;
+                        that karat's stock goes up by the equivalent karat weight (more grams, since it's diluted — the fine content stays the same).
+                    </p>
+                    <form onSubmit={handleConvertFineToKarat} className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                                <input
+                                    type="date"
+                                    value={convertDate}
+                                    onChange={(e) => setConvertDate(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Target Karat</label>
+                                <select
+                                    value={convertKarat}
+                                    onChange={(e) => setConvertKarat(parseFloat(e.target.value))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    required
+                                >
+                                    {KARAT_OPTIONS.map(k => (
+                                        <option key={k} value={k}>{k}%</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Fine Amount to Convert (grams)</label>
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    value={convertFineAmount}
+                                    onChange={(e) => setConvertFineAmount(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    placeholder="0.00"
+                                    required
+                                />
+                            </div>
+                        </div>
+
+                        {convertFineAmount && !isNaN(parseFloat(convertFineAmount)) && (
+                            <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg text-sm text-purple-800">
+                                {parseFloat(convertFineAmount).toFixed(3)}g Fine → {(parseFloat(convertFineAmount) / (convertKarat / 100)).toFixed(3)}g of {convertKarat}K gold
+                            </div>
+                        )}
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Description (Optional)</label>
+                            <textarea
+                                value={convertDescription}
+                                onChange={(e) => setConvertDescription(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                rows={2}
+                                placeholder="e.g., Alloyed for order batch..."
+                            />
+                        </div>
+                        <button
+                            type="submit"
+                            disabled={converting}
+                            className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg font-medium disabled:opacity-50"
+                        >
+                            {converting ? 'Converting...' : 'Convert'}
+                        </button>
+                    </form>
+                </div>
+            )}
+
             {/* Stock by Karat */}
             <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
                 <h2 className="text-xl font-semibold text-gray-900 mb-4">Stock by Karat</h2>
@@ -307,6 +442,7 @@ const AdminStockPage = () => {
                     <li>When an order is completed, the pure gold weight used is automatically deducted from that order's karat</li>
                     <li>Each karat is tracked separately in karat-gold weight; the total shown at the top is the fine-gold equivalent</li>
                     <li>Stock can go negative if more gold has been given out than recorded as added</li>
+                    <li>Use &quot;Convert Fine → Karat&quot; to alloy pure Fine Gold into a specific karat — this needs enough Fine Gold on hand and won&apos;t go negative</li>
                 </ul>
             </div>
         </div>

@@ -284,7 +284,7 @@ export interface AdminGoldEntry {
   date: Date
   karat: number // purity percentage: 92, 88, 84, 80, 76, 75.5, 75, 59, 37.5 — 0 for fine-only entries (e.g. CUSTOMER_GOLD_RECOVERED) that aren't tied to a karat
   weight: number // Signed weight in grams: positive = gold added, negative = gold given out
-  type: 'MANUAL' | 'ORDER_COMPLETE' | 'ORDER_FILLING' | 'ORDER_DELETED' | 'KARIGAR_LOSS_RECOVERED' | 'CUSTOMER_GOLD_RECOVERED' // Manual add/remove, automatic deduction from a completed order, automatic deduction/return from a Filling In edit in the order register, automatic return of Filling In gold when the order is deleted, automatic credit from clearing recovered karigar loss, or automatic credit from collecting jama gold back from a customer
+  type: 'MANUAL' | 'ORDER_COMPLETE' | 'ORDER_FILLING' | 'ORDER_DELETED' | 'KARIGAR_LOSS_RECOVERED' | 'CUSTOMER_GOLD_RECOVERED' | 'FINE_TO_KARAT' // Manual add/remove, automatic deduction from a completed order, automatic deduction/return from a Filling In edit in the order register, automatic return of Filling In gold when the order is deleted, automatic credit from clearing recovered karigar loss, automatic credit from collecting jama gold back from a customer, or an internal conversion moving weight from the fine bucket into a karat bucket (alloying)
   description?: string
   orderId?: string // If this entry is from a completed order
   createdAt: Date
