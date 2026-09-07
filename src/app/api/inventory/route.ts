@@ -1,8 +1,17 @@
 import { NextRequest } from 'next/server'
-import { getInventoryCollection, getUsersCollection, getOrdersCollection } from '@/lib/mongodb'
-import { toClientFormat } from '@/types/mongodb'
+import { getInventoryCollection, getUsersCollection, getOrdersCollection, getDb } from '@/lib/mongodb'
+import { toClientFormat, AdminGoldStock } from '@/types/mongodb'
 import { ObjectId } from 'mongodb'
 import { verifyToken, extractTokenFromHeader } from '@/lib/jwt'
+import { calculateAdminFineTotal } from '@/lib/admin-stock-karats'
+import {
+  calculateKarigarLossByKarat,
+  calculateNetFineKarigarLoss,
+  calculateNetRawKarigarLoss,
+  calculateFinishedGoodsByKarat,
+  calculateRawFinishedGoods,
+  calculateFineFinishedGoods
+} from '@/lib/karigar-loss'
 import {
   handleApiError,
   handleApiSuccess,
@@ -123,32 +132,98 @@ export async function GET(request: NextRequest) {
       throw new Error('Inventory is unexpectedly null')
     }
 
-    // Calculate karigarLossStock dynamically from all orders (fillingIn - finishWeight)
+    // Gold given to a karigar (fillingIn) moves through several buckets over an order's life, and
+    // Total Stock must always add up to the same conserved total no matter which stage it's in:
+    //  - Still in process (not COMPLETED/DELIVERED): the fillingIn-finishWeight gap is gold that is
+    //    simply sitting with the karigar right now - it hasn't been lost, it's just not back yet.
+    //    This is what makes Admin Stock go down when you add a Filling In entry - the same amount
+    //    shows up here instead, so Total Stock doesn't move (it only relocated, admin -> karigar).
+    //  - COMPLETED but not yet DELIVERED (billed): Finish Weight is now final. The shortfall
+    //    (fillingIn - finishWeight) is realized Karigar Loss. The finishWeight itself is a real,
+    //    finished piece sitting in the shop, not yet billed - tracked as "Finished Goods (Awaiting
+    //    Bill)" so it isn't silently missing from Total Stock while it waits to be invoiced.
+    //  - DELIVERED (billed): Finished Goods drops out - its fine value has moved into Customer Stock
+    //    (plus making charge/profit, which is new value, not gold re-appearing) via the bill route.
+    //    The Karigar Loss shortfall stays booked (drives "Clear Total Loss").
     const ordersCol = await getOrdersCollection()
-    const allOrders = await ordersCol.find({}, { projection: { fillingIn: 1, finishWeight: 1 } }).toArray()
-    let calculatedKarigarLossStock = 0
-    allOrders.forEach((o: any) => {
+    const allOrders = await ordersCol.find({}, { projection: { fillingIn: 1, finishWeight: 1, selectedKarat: 1, status: 1 } }).toArray()
+    const isFinalized = (o: any) => o.status === 'COMPLETED' || o.status === 'DELIVERED'
+    const inProcessOrders = allOrders.filter((o: any) => !isFinalized(o))
+    const finalizedOrders = allOrders.filter(isFinalized)
+    const completedNotBilledOrders = allOrders.filter((o: any) => o.status === 'COMPLETED')
+
+    // Raw (karat-mixed) figures for display cards
+    let calculatedKarigarInProcessStock = 0
+    inProcessOrders.forEach((o: any) => {
       const fIn = o.fillingIn || 0
       const fWeight = o.finishWeight || 0
-      calculatedKarigarLossStock += Math.max(0, fIn - fWeight)
+      calculatedKarigarInProcessStock += Math.max(0, fIn - fWeight)
     })
-    const karigarLossClearedAmount = inventory.karigarLossClearedAmount || 0
-    const karigarLossStock = parseFloat(Math.max(0, calculatedKarigarLossStock - karigarLossClearedAmount).toFixed(3))
+    const karigarInProcessStock = parseFloat(Math.max(0, calculatedKarigarInProcessStock).toFixed(3))
+
     const recoveredStock = inventory.recoveredStock || 0
+
+    // Fine-gold, per-karat versions (correct per-karat conversion, same source as Analytics) - used for Total Stock.
+    const karigarInProcessByKarat = calculateKarigarLossByKarat(inProcessOrders as any)
+    const karigarInProcessStockFine = Math.max(0, calculateNetFineKarigarLoss(karigarInProcessByKarat, {}))
+
+    // Net of whatever has already been "recovered" (cleared) per karat - see clear-karigar-loss route.
+    // Netting is done PER KARAT (clamped at 0 each) before combining, so a karat that was over-cleared
+    // in the past (e.g. its orders were later deleted) can't cancel out genuine new loss in another karat.
+    const karigarLossByKarat = calculateKarigarLossByKarat(finalizedOrders as any)
+    const clearedByKarat = inventory.karigarLossClearedByKarat || {}
+    const karigarLossStock = calculateNetRawKarigarLoss(karigarLossByKarat, clearedByKarat)
+    const karigarLossStockFine = calculateNetFineKarigarLoss(karigarLossByKarat, clearedByKarat)
+
+    // Finished Goods (Awaiting Bill): Finish Weight itself, for COMPLETED-but-not-yet-DELIVERED orders
+    const finishedGoodsByKarat = calculateFinishedGoodsByKarat(completedNotBilledOrders as any)
+    const finishedGoodsAwaitingBillStock = calculateRawFinishedGoods(finishedGoodsByKarat)
+    const finishedGoodsAwaitingBillStockFine = calculateFineFinishedGoods(finishedGoodsByKarat)
+
+    // Admin Stock: karat-wise ledger converted to fine gold
+    const db = await getDb()
+    const adminStockDoc = await db.collection<AdminGoldStock>('adminGoldStock').findOne({})
+    const adminStockFine = adminStockDoc ? calculateAdminFineTotal(adminStockDoc as any) : 0
+
+    // Total Stock = Admin (fine) + Karigar In-Process (fine) + Finished Goods Awaiting Bill (fine)
+    //             + Karigar Loss (fine) + Customer Stock
+    const totalStock = parseFloat(
+      (
+        adminStockFine +
+        (inventory.customerStock || 0) +
+        karigarInProcessStockFine +
+        finishedGoodsAwaitingBillStockFine +
+        karigarLossStockFine
+      ).toFixed(3)
+    )
 
     // Return only what dashboard needs: inventory snapshot + simple summary
     return handleApiSuccess({
       inventory: toClientFormat({
         _id: inventory._id,
         customerStock: inventory.customerStock,
+        karigarInProcessStock,
+        karigarInProcessStockFine,
+        finishedGoodsAwaitingBillStock,
+        finishedGoodsAwaitingBillStockFine,
         karigarLossStock,
-        recoveredStock
+        recoveredStock,
+        adminStockFine,
+        karigarLossStockFine,
+        totalStock
       } as any),
       recentTransactions: [],
       summary: {
         customerStock: inventory.customerStock,
+        karigarInProcessStock,
+        karigarInProcessStockFine,
+        finishedGoodsAwaitingBillStock,
+        finishedGoodsAwaitingBillStockFine,
         karigarLossStock,
-        recoveredStock
+        recoveredStock,
+        adminStockFine,
+        karigarLossStockFine,
+        totalStock
       }
     }, requestId)
   } catch (error) {

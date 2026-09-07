@@ -5,13 +5,27 @@ import { useEffect, useState } from 'react'
 interface InventoryData {
   inventory: {
     customerStock: number
+    karigarInProcessStock?: number
+    karigarInProcessStockFine?: number
+    finishedGoodsAwaitingBillStock?: number
+    finishedGoodsAwaitingBillStockFine?: number
     karigarLossStock?: number
     recoveredStock?: number
+    adminStockFine?: number
+    karigarLossStockFine?: number
+    totalStock?: number
   }
   summary: {
     customerStock: number
+    karigarInProcessStock?: number
+    karigarInProcessStockFine?: number
+    finishedGoodsAwaitingBillStock?: number
+    finishedGoodsAwaitingBillStockFine?: number
     karigarLossStock?: number
     recoveredStock?: number
+    adminStockFine?: number
+    karigarLossStockFine?: number
+    totalStock?: number
   }
   recentTransactions: Array<{
     id: string
@@ -283,6 +297,38 @@ const Dashboard = () => {
         </div>
       </div>
 
+      {/* Total Stock, Admin Stock, Karigar Stock (In Process) & Finished Goods (Awaiting Bill) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="bg-gradient-to-r from-green-500 to-emerald-600 p-6 rounded-lg text-white">
+          <h3 className="text-sm font-medium text-green-100 uppercase tracking-wide">Total Stock</h3>
+          <p className="mt-2 text-3xl font-bold">
+            {(inventoryData?.inventory.totalStock ?? inventoryData?.summary.totalStock ?? 0).toFixed(3)}g
+          </p>
+          <p className="text-xs text-green-100 mt-1">Admin + In-Process + Finished (Awaiting Bill) + Karigar Loss + Customer (all fine)</p>
+        </div>
+        <div className="bg-gradient-to-r from-amber-400 to-yellow-600 p-6 rounded-lg text-white">
+          <h3 className="text-sm font-medium text-amber-100 uppercase tracking-wide">Admin Stock (Fine)</h3>
+          <p className="mt-2 text-3xl font-bold">
+            {(inventoryData?.inventory.adminStockFine ?? inventoryData?.summary.adminStockFine ?? 0).toFixed(3)}g
+          </p>
+          <p className="text-xs text-amber-100 mt-1">Gold physically on hand — see Admin Stock page</p>
+        </div>
+        <div className="bg-gradient-to-r from-sky-400 to-indigo-600 p-6 rounded-lg text-white">
+          <h3 className="text-sm font-medium text-sky-100 uppercase tracking-wide">Karigar Stock (In Process)</h3>
+          <p className="mt-2 text-3xl font-bold">
+            {(inventoryData?.inventory.karigarInProcessStock ?? inventoryData?.summary.karigarInProcessStock ?? 0).toFixed(3)}g
+          </p>
+          <p className="text-xs text-sky-100 mt-1">Filling In given out, not yet finished — moved from Admin Stock, not lost</p>
+        </div>
+        <div className="bg-gradient-to-r from-purple-400 to-fuchsia-600 p-6 rounded-lg text-white">
+          <h3 className="text-sm font-medium text-purple-100 uppercase tracking-wide">Finished Goods (Awaiting Bill)</h3>
+          <p className="mt-2 text-3xl font-bold">
+            {(inventoryData?.inventory.finishedGoodsAwaitingBillStock ?? inventoryData?.summary.finishedGoodsAwaitingBillStock ?? 0).toFixed(3)}g
+          </p>
+          <p className="text-xs text-purple-100 mt-1">Order completed, not yet billed — the finished piece, sitting in the shop</p>
+        </div>
+      </div>
+
       {/* Stock Summary - Karigar Loss, Customer Stock, Recovered Stock, Manual Making Charge */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {/* Karigar Total Loss Card */}
@@ -302,7 +348,7 @@ const Dashboard = () => {
               </p>
               <p className="text-xs text-blue-100 mt-1">
                 {lossMode === 'total'
-                  ? 'Total loss accumulated (Filing In - Finish Weight)'
+                  ? 'Realized loss on completed orders (Filing In - Finish Weight)'
                   : (() => {
                     const safeMonth = lossMonth || new Date().toISOString().slice(0, 7)
                     const d = new Date(safeMonth + '-01')

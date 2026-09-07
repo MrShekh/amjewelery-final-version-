@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getOrdersCollection, getCustomersCollection, getManufacturingProcessesCollection, getGoldTransactionsCollection, getKarigarsCollection, getCustomerJamaBalancesCollection, getUsersCollection, getDb } from '@/lib/mongodb'
-import { TransactionType, OrderStatus, toClientFormat, ManagerGoldStock, ManagerGoldEntry } from '@/types/mongodb'
+import { TransactionType, OrderStatus, toClientFormat, AdminGoldStock, AdminGoldEntry } from '@/types/mongodb'
 import { ObjectId } from 'mongodb'
 import { verifyToken, extractTokenFromHeader } from '@/lib/jwt'
+import { karatFieldKey } from '@/lib/admin-stock-karats'
 import {
   handleApiError,
   handleApiSuccess,
@@ -218,72 +219,54 @@ export async function POST(
       newTransactions.push(await transactionsCol.findOne({ _id: completionTxResult.insertedId }))
     }
 
-    // Update Manager Stock - Automatically add MANAGER_TO_ADMIN entry
-    // This represents the pure gold weight (without stones) being returned to admin from completed order
+    // Update Admin Gold Stock - Automatically deduct the karat gold consumed by this order
+    // The pure gold weight (without stones) used to produce this order leaves admin's
+    // raw gold-on-hand for that karat, since it's now embodied in a finished piece.
     try {
       const db = await getDb()
-      const managerStockCollection = db.collection<ManagerGoldStock>('managerGoldStock')
+      const adminStockCollection = db.collection<AdminGoldStock>('adminGoldStock')
 
-      // Get or create manager stock
-      let managerStock = await managerStockCollection.findOne({})
+      let adminStock = await adminStockCollection.findOne({})
 
-      if (!managerStock) {
-        const newStock: ManagerGoldStock = {
-          stock22k: 0,
-          stock75k: 0,
-          stock76k: 0,
-          stock80k: 0,
-          stock88k: 0,
-          stock92k: 0,
-          stock59k: 0,
-          stock755k: 0,
-          stock375k: 0,
-          stock9k: 0,
+      if (!adminStock) {
+        const newStock: AdminGoldStock = {
           entries: [],
           lastUpdated: new Date(),
           createdAt: new Date()
         }
 
-        const result = await managerStockCollection.insertOne(newStock as any)
-        managerStock = { ...newStock, _id: result.insertedId }
+        const result = await adminStockCollection.insertOne(newStock as any)
+        adminStock = { ...newStock, _id: result.insertedId }
       }
 
-      // Create manager stock entry for this completed order
-      const managerEntry: ManagerGoldEntry = {
+      // Create admin stock entry for this completed order (negative = gold consumed)
+      const adminEntry: AdminGoldEntry = {
         _id: new ObjectId(),
         date: now,
         karat: selectedKarat,
-        weight: actualGoldWeight, // Pure gold weight without stones
-        type: 'MANAGER_TO_ADMIN',
+        weight: -actualGoldWeight, // Pure gold weight without stones, leaving admin stock
+        type: 'ORDER_COMPLETE',
         description: `Order ${order.orderName} completed - Pure gold weight`,
         orderId: id,
         createdAt: now
       }
 
-      // Update stock based on karat
-      const karatKey = selectedKarat === 75.5 ? '755' : selectedKarat === 37.5 ? '375' : selectedKarat.toString()
-      const stockField = `stock${karatKey}k` as keyof ManagerGoldStock
-      const currentStock = (managerStock[stockField] as number) || 0
-      const updatedStock = Math.max(0, currentStock - actualGoldWeight) // Deduct from manager stock
+      const stockField = karatFieldKey(selectedKarat)
 
-      // Update database
-      await managerStockCollection.updateOne(
-        { _id: managerStock._id },
+      // Update database (no floor at zero - admin stock is allowed to go negative)
+      await adminStockCollection.updateOne(
+        { _id: adminStock._id },
         {
-          $set: {
-            [stockField]: updatedStock,
-            lastUpdated: now
-          },
-          $push: {
-            entries: managerEntry as any
-          }
+          $inc: { [stockField]: -actualGoldWeight },
+          $set: { lastUpdated: now },
+          $push: { entries: adminEntry as any }
         }
       )
 
-      console.log(`[${requestId}] Manager stock updated: ${selectedKarat}K gold -${actualGoldWeight.toFixed(2)}g`)
+      console.log(`[${requestId}] Admin stock updated: ${selectedKarat}K gold -${actualGoldWeight.toFixed(2)}g`)
     } catch (error) {
-      console.error(`[${requestId}] Error updating manager stock:`, error)
-      // Don't fail the order completion if manager stock update fails
+      console.error(`[${requestId}] Error updating admin stock:`, error)
+      // Don't fail the order completion if admin stock update fails
     }
 
 

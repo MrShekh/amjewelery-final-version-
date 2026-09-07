@@ -61,10 +61,10 @@ const Navigation = () => {
                 Analytics
               </Link>
               <Link
-                href="/manager"
-                className={`px-3 py-2 rounded-md text-sm font-medium ${isActive('/manager')}`}
+                href="/admin-stock"
+                className={`px-3 py-2 rounded-md text-sm font-medium ${isActive('/admin-stock')}`}
               >
-                Ezaz Ahmad
+                Admin Stock
               </Link>
               <Link
                 href="/bills"

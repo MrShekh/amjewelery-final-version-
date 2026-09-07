@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getOrdersCollection, getCustomersCollection, getManufacturingProcessesCollection, getGoldTransactionsCollection, getKarigarsCollection, getUsersCollection, getInventoryCollection, getCustomerJamaBalancesCollection, getBillsCollection } from '@/lib/mongodb'
-import { toClientFormat } from '@/types/mongodb'
-import { ObjectId } from 'mongodb'
+import { getOrdersCollection, getCustomersCollection, getManufacturingProcessesCollection, getGoldTransactionsCollection, getKarigarsCollection, getUsersCollection, getInventoryCollection, getCustomerJamaBalancesCollection, getBillsCollection, getDb } from '@/lib/mongodb'
+import { toClientFormat, AdminGoldStock, AdminGoldEntry } from '@/types/mongodb'
+import { ObjectId, Collection } from 'mongodb'
 import { verifyToken, extractTokenFromHeader } from '@/lib/jwt'
 import { truncateToThreeDecimals } from '@/utils/numberFormat'
+import { ADMIN_STOCK_KARATS, karatFieldKey } from '@/lib/admin-stock-karats'
 
 // GET /api/orders/[id] - Get order by ID
 export async function GET(
@@ -244,11 +245,83 @@ export async function PUT(
     updateData.actualFinalWeight = finishWeight
     updateData.actualGoldWeight = finishWeight
 
+    // Filling In gold is handed to the karigar out of admin's physical stock, at the order's karat.
+    // Any change to Filling In (first entry or a later top-up/correction) must move admin stock by the same delta.
+    let adminStockDelta = 0
+    let adminStockKarat = 0
+    if (body.fillingIn !== undefined) {
+      const oldFillingIn = existingOrder.fillingIn || 0
+      const newFillingIn = updateData.fillingIn as number
+      adminStockDelta = parseFloat((newFillingIn - oldFillingIn).toFixed(3))
+      adminStockKarat = (updateData.selectedKarat as number) ?? existingOrder.selectedKarat ?? 92
+    }
+
+    let adminStockCollection: Collection<AdminGoldStock> | null = null
+    let adminStockFieldKey = ''
+    let adminStockDoc: (AdminGoldStock & { _id: ObjectId }) | null = null
+
+    if (adminStockDelta !== 0) {
+      if (!ADMIN_STOCK_KARATS.includes(adminStockKarat as any)) {
+        return NextResponse.json(
+          { error: `Cannot adjust admin stock: ${adminStockKarat} is not a valid karat purity` },
+          { status: 400 }
+        )
+      }
+
+      const db = await getDb()
+      adminStockCollection = db.collection<AdminGoldStock>('adminGoldStock')
+      adminStockDoc = await adminStockCollection.findOne({}) as (AdminGoldStock & { _id: ObjectId }) | null
+
+      if (!adminStockDoc) {
+        const now = new Date()
+        const newStock: AdminGoldStock = { entries: [], lastUpdated: now, createdAt: now }
+        const result = await adminStockCollection.insertOne(newStock as any)
+        adminStockDoc = { ...newStock, _id: result.insertedId }
+      }
+
+      adminStockFieldKey = karatFieldKey(adminStockKarat)
+      const currentKaratStock = (adminStockDoc as any)[adminStockFieldKey] || 0
+      const newKaratStock = parseFloat((currentKaratStock - adminStockDelta).toFixed(3))
+
+      if (newKaratStock < 0) {
+        return NextResponse.json(
+          {
+            error: `Insufficient admin stock at ${adminStockKarat}K: have ${currentKaratStock.toFixed(3)}g, need ${adminStockDelta.toFixed(3)}g more for Filling In`
+          },
+          { status: 400 }
+        )
+      }
+    }
+
     // Update the order
     await ordersCol.updateOne(
       { _id: new ObjectId(id) },
       { $set: updateData }
     )
+
+    // Apply the corresponding admin stock movement now that the order update is confirmed
+    if (adminStockDelta !== 0 && adminStockCollection && adminStockDoc) {
+      const now = new Date()
+      const adminEntry: AdminGoldEntry = {
+        _id: new ObjectId(),
+        date: now,
+        karat: adminStockKarat,
+        weight: -adminStockDelta, // positive Filling In delta = gold given out (negative entry); negative delta = gold returned
+        type: 'ORDER_FILLING',
+        description: `Order ${existingOrder.orderName || existingOrder.orderNumber || id} - Filling In ${adminStockDelta > 0 ? '+' : ''}${adminStockDelta.toFixed(3)}g (${adminStockKarat}K)`,
+        orderId: id,
+        createdAt: now
+      }
+
+      await adminStockCollection.updateOne(
+        { _id: adminStockDoc._id },
+        {
+          $inc: { [adminStockFieldKey]: -adminStockDelta },
+          $set: { lastUpdated: now },
+          $push: { entries: adminEntry as any }
+        }
+      )
+    }
 
     // Sync register fields to processes collection
     await syncOrderProcessesToKarigars(id)
@@ -452,6 +525,64 @@ export async function DELETE(
       console.log(`Restored ${extraFineGoldAmount.toFixed(3)}g fine gold (${totalExtraStockToRestore.toFixed(3)}g at ${karatPurity}%) to extra stock`)
     }
 
+    // Restore Admin Stock at the order's karat - the amount depends on how far the order got:
+    //  - CREATED/IN_PROCESS: nothing has been produced yet, so the full Filling In (gold sitting
+    //    with the karigar) comes back, exactly as it left.
+    //  - COMPLETED (not yet billed): Finish Weight is a real, finished piece - deleting the order
+    //    melts it back into raw Admin Stock. We restore Finish Weight, NOT Filling In: the
+    //    fillingIn-finishWeight shortfall is a real, permanent loss (dust/wastage) that doesn't
+    //    come back just because the order record is deleted - whether or not it was already
+    //    "cleared" via Clear Total Loss (restoring the full Filling In here would double-credit
+    //    Admin Stock for loss that was already compensated).
+    //  - DELIVERED: the piece is already with the customer and billed - nothing to restore here,
+    //    the DELIVERED-specific billing reversal above already handles that side.
+    let amountToRestore = 0
+    if (existingOrder.status === 'COMPLETED') {
+      amountToRestore = existingOrder.finishWeight || 0
+    } else if (existingOrder.status !== 'DELIVERED') {
+      amountToRestore = existingOrder.fillingIn || 0
+    }
+    let adminStockRestored = 0
+
+    if (amountToRestore !== 0 && ADMIN_STOCK_KARATS.includes(karatPurity as any)) {
+      const db = await getDb()
+      const adminStockCollection = db.collection<AdminGoldStock>('adminGoldStock')
+      let adminStockDoc = await adminStockCollection.findOne({})
+
+      if (!adminStockDoc) {
+        const now = new Date()
+        const newStock: AdminGoldStock = { entries: [], lastUpdated: now, createdAt: now }
+        const result = await adminStockCollection.insertOne(newStock as any)
+        adminStockDoc = { ...newStock, _id: result.insertedId }
+      }
+
+      const now = new Date()
+      const fieldKey = karatFieldKey(karatPurity)
+      const restoredFieldLabel = existingOrder.status === 'COMPLETED' ? 'Finish Weight' : 'Filling In'
+      const adminEntry: AdminGoldEntry = {
+        _id: new ObjectId(),
+        date: now,
+        karat: karatPurity,
+        weight: amountToRestore, // positive = gold returned to admin stock
+        type: 'ORDER_DELETED',
+        description: `Order ${existingOrder.orderName || existingOrder.orderNumber || id} deleted - ${restoredFieldLabel} ${amountToRestore.toFixed(3)}g returned (${karatPurity}K)`,
+        orderId: id,
+        createdAt: now
+      }
+
+      await adminStockCollection.updateOne(
+        { _id: adminStockDoc._id },
+        {
+          $inc: { [fieldKey]: amountToRestore },
+          $set: { lastUpdated: now },
+          $push: { entries: adminEntry as any }
+        }
+      )
+
+      adminStockRestored = amountToRestore
+      console.log(`Restored ${amountToRestore.toFixed(3)}g admin stock at ${karatPurity}K for deleted order ${id}`)
+    }
+
     // Delete all related data
     await Promise.all([
       // Delete all processes
@@ -463,10 +594,11 @@ export async function DELETE(
     ])
 
     const totalRestored = totalKarigarStockToRestore + totalExtraStockToRestore
-    console.log(`Order ${id} deleted successfully, restored ${totalRestored.toFixed(3)}g total stock (${totalKarigarStockToRestore.toFixed(3)}g karigar + ${totalExtraStockToRestore.toFixed(3)}g extra)`)
+    console.log(`Order ${id} deleted successfully, restored ${totalRestored.toFixed(3)}g total stock (${totalKarigarStockToRestore.toFixed(3)}g karigar + ${totalExtraStockToRestore.toFixed(3)}g extra), ${adminStockRestored.toFixed(3)}g admin stock`)
 
     return NextResponse.json({
-      message: `Order deleted successfully. Restored ${totalKarigarStockToRestore.toFixed(3)}g to karigar stock and ${totalExtraStockToRestore.toFixed(3)}g to extra stock. In-process stock cleared.`,
+      message: `Order deleted successfully. Restored ${adminStockRestored.toFixed(3)}g to Admin Stock (${karatPurity}K). In-process stock cleared.`,
+      adminStockRestored,
       karigarStockRestored: totalKarigarStockToRestore,
       extraStockRestored: totalExtraStockToRestore,
       inProcessStockCleared: true

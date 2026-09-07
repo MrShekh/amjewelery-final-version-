@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getCustomerJamaBalancesCollection, getOrdersCollection } from '@/lib/mongodb'
-import { toClientFormat } from '@/types/mongodb'
+import { getCustomerJamaBalancesCollection, getOrdersCollection, getDb } from '@/lib/mongodb'
+import { toClientFormat, AdminGoldStock, AdminGoldEntry } from '@/types/mongodb'
 import { ObjectId } from 'mongodb'
 
 // GET /api/customers/[id]/jama-gold - Get jama gold balances for a specific customer
@@ -274,7 +274,7 @@ export async function PUT(
 
     await Promise.all(updatePromises)
 
-    // Update main inventory: customer stock decreases (simple model, no admin stock)
+    // Update main inventory: customer stock decreases (gold physically moves to admin)
     await inventoryCol.updateOne(
       {},
       {
@@ -282,6 +282,36 @@ export async function PUT(
           customerStock: -parseFloat(returnAmount) // Remove from customer stock
         },
         $set: { lastUpdated: now }
+      }
+    )
+
+    // Credit the recovered gold into Admin Stock so Total Stock stays conserved
+    // (it moved from the customer bucket into admin's hands, not out of the business)
+    const db = await getDb()
+    const adminStockCol = db.collection<AdminGoldStock>('adminGoldStock')
+    let adminStock = await adminStockCol.findOne({})
+    if (!adminStock) {
+      const newStock: AdminGoldStock = { entries: [], lastUpdated: now, createdAt: now }
+      const result = await adminStockCol.insertOne(newStock as any)
+      adminStock = { ...newStock, _id: result.insertedId }
+    }
+
+    const recoveryEntry: AdminGoldEntry = {
+      _id: new ObjectId(),
+      date: now,
+      karat: 0,
+      weight: parseFloat(returnAmount),
+      type: 'CUSTOMER_GOLD_RECOVERED',
+      description: `Recovered from customer ${customer.name}: ${description}`,
+      createdAt: now
+    }
+
+    await adminStockCol.updateOne(
+      { _id: adminStock._id },
+      {
+        $inc: { fineStock: parseFloat(returnAmount) },
+        $set: { lastUpdated: now },
+        $push: { entries: recoveryEntry as any }
       }
     )
 

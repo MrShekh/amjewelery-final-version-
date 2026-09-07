@@ -145,17 +145,19 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Apply clearedAfter boundary (analytics reset): only count orders after this date
+    // Apply clearedAfter boundary (analytics reset): only count orders CREATED after this date.
+    // This must key off createdAt (not `dateField`, which for analytics is updatedAt) - otherwise
+    // an old order that merely gets edited again after the clear (e.g. a later register update)
+    // would have its updatedAt pushed past the boundary and reappear, even though it isn't new.
     if (clearedAfter) {
       const clearedAfterDate = new Date(clearedAfter)
       if (!isNaN(clearedAfterDate.getTime())) {
-        // If there is already a $gte from dateFilter, take the LATER of the two
-        if (filter[dateField] && filter[dateField].$gte) {
-          if (clearedAfterDate > filter[dateField].$gte) {
-            filter[dateField].$gte = clearedAfterDate
+        if (filter.createdAt && filter.createdAt.$gte) {
+          if (clearedAfterDate > filter.createdAt.$gte) {
+            filter.createdAt.$gte = clearedAfterDate
           }
         } else {
-          filter[dateField] = { ...filter[dateField], $gte: clearedAfterDate }
+          filter.createdAt = { ...filter.createdAt, $gte: clearedAfterDate }
         }
       }
     }

@@ -247,6 +247,8 @@ export interface Inventory {
   customerStock: number // Customer/market stock
   karigarLossStock: number // Total gold lost by karigars (unrecovered)
   recoveredStock: number // Gold recovered back from karigar loss
+  karigarLossClearedAmount?: number // Raw (per-karat-mixed) baseline subtracted from the live karigar loss total when "Clear Total Loss" is clicked (dashboard card only)
+  karigarLossClearedByKarat?: Record<string, number> // Per-karat raw loss baseline already cleared (keyed like AdminGoldStock fields: k92, k88, ...). Used to compute the net fine loss for Total Stock, and to know exactly how much karat gold to credit into Admin Stock each time "Clear Total Loss" is clicked.
 
   // Advance Customer Stock (separate from main stocks)
   advanceCustomerStock: number // Advance gold given by customers for orders (tracked individually)
@@ -275,39 +277,40 @@ export interface Inventory {
   createdAt: Date
 }
 
-// Manager Gold Stock Management
-export interface ManagerGoldEntry {
+// Admin Gold Stock Management — karat-wise ledger of admin's own raw gold
+export interface AdminGoldEntry {
   _id?: ObjectId
   id?: string
   date: Date
-  karat: number // 22, 75, etc.
-  weight: number // Weight in grams
-  type: 'ADMIN_TO_MANAGER' | 'MANAGER_TO_ADMIN' // Direction of transfer
+  karat: number // purity percentage: 92, 88, 84, 80, 76, 75.5, 75, 59, 37.5 — 0 for fine-only entries (e.g. CUSTOMER_GOLD_RECOVERED) that aren't tied to a karat
+  weight: number // Signed weight in grams: positive = gold added, negative = gold given out
+  type: 'MANUAL' | 'ORDER_COMPLETE' | 'ORDER_FILLING' | 'ORDER_DELETED' | 'KARIGAR_LOSS_RECOVERED' | 'CUSTOMER_GOLD_RECOVERED' // Manual add/remove, automatic deduction from a completed order, automatic deduction/return from a Filling In edit in the order register, automatic return of Filling In gold when the order is deleted, automatic credit from clearing recovered karigar loss, or automatic credit from collecting jama gold back from a customer
   description?: string
   orderId?: string // If this entry is from a completed order
   createdAt: Date
 }
 
-export interface ManagerGoldStock {
+export interface AdminGoldStock {
   _id?: ObjectId
   id?: string
   userId?: string // For multi-tenant support
   organizationId?: string // For multi-tenant support
 
-  // Stock by karat (all values in grams)
-  stock22k: number // 22 karat gold
-  stock75k: number // 75 karat gold (18k)
-  stock76k: number // 76 karat gold
-  stock80k: number // 80 karat gold
-  stock88k: number // 88 karat gold
-  stock92k: number // 92 karat gold (22k)
-  stock59k: number // 59 karat gold (14k)
-  stock755k: number // 75.5 karat gold
-  stock375k: number // 37.5 karat gold (9k)
-  stock9k: number // 9 karat gold
+  // Stock by karat purity (all values in grams, karat gold — not fine).
+  // Field keys generated via karatFieldKey() in src/lib/admin-stock-karats.ts
+  k92?: number
+  k88?: number
+  k84?: number
+  k80?: number
+  k76?: number
+  k75_5?: number
+  k75?: number
+  k59?: number
+  fineStock?: number // Fine gold credited directly (not tied to a karat) — e.g. gold recovered back from a customer
+  k37_5?: number
 
   // Entries history
-  entries: ManagerGoldEntry[]
+  entries: AdminGoldEntry[]
 
   lastUpdated: Date
   createdAt: Date
