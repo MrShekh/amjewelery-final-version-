@@ -9,7 +9,7 @@ interface AdminGoldEntry {
     date: Date | string
     karat: number
     weight: number // signed: positive = added, negative = removed
-    type: 'MANUAL' | 'ORDER_COMPLETE' | 'KARIGAR_LOSS_RECOVERED' | 'CUSTOMER_GOLD_RECOVERED'
+    type: 'MANUAL' | 'ORDER_COMPLETE' | 'ORDER_FILLING' | 'ORDER_DELETED' | 'KARIGAR_LOSS_RECOVERED' | 'CUSTOMER_GOLD_RECOVERED'
     description?: string
     orderId?: string
     createdAt: Date | string
@@ -34,6 +34,8 @@ interface AdminGoldStock {
 const ENTRY_TYPE_LABELS: Record<AdminGoldEntry['type'], string> = {
     MANUAL: 'Manual',
     ORDER_COMPLETE: 'Auto from Order',
+    ORDER_FILLING: 'Filling In (Order)',
+    ORDER_DELETED: 'Order Deleted (Returned)',
     KARIGAR_LOSS_RECOVERED: 'Recovered from Karigar Loss',
     CUSTOMER_GOLD_RECOVERED: 'Recovered from Customer'
 }
@@ -160,14 +162,14 @@ const AdminStockPage = () => {
             <div className="bg-gradient-to-r from-green-500 to-emerald-600 p-6 rounded-lg text-white">
                 <h2 className="text-lg font-semibold mb-1">Total Admin Stock (Fine Gold)</h2>
                 <p className="text-4xl font-bold">{(adminStock?.fineTotal ?? 0).toFixed(3)}g</p>
-                <p className="text-green-100 mt-2 text-sm">Sum of every karat below, converted to fine, plus gold recovered from customers</p>
+                <p className="text-green-100 mt-2 text-sm">Sum of every karat below, converted to fine, plus direct fine gold (manual + recovered from customers)</p>
             </div>
 
-            {/* Recovered from Customers */}
+            {/* Direct Fine Gold (manual additions + recovered from customers) */}
             <div className="bg-gradient-to-r from-sky-500 to-blue-600 p-6 rounded-lg text-white">
-                <h2 className="text-lg font-semibold mb-1">Recovered from Customers (Fine Gold)</h2>
+                <h2 className="text-lg font-semibold mb-1">Fine Gold (Direct)</h2>
                 <p className="text-3xl font-bold">{(adminStock?.fineStock ?? 0).toFixed(3)}g</p>
-                <p className="text-sky-100 mt-2 text-sm">Gold collected back from customers, credited straight to admin stock</p>
+                <p className="text-sky-100 mt-2 text-sm">Not tied to any karat — added directly as fine, or recovered back from customers</p>
             </div>
 
             {/* Add / Remove Gold Form */}
@@ -194,6 +196,7 @@ const AdminStockPage = () => {
                                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     required
                                 >
+                                    <option value={0}>Fine (direct, not tied to a karat)</option>
                                     {KARAT_OPTIONS.map(k => (
                                         <option key={k} value={k}>{k}%</option>
                                     ))}

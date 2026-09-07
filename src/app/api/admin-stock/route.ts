@@ -63,7 +63,9 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST - Add a manual entry (gold added or given out), for a specific karat
+// POST - Add a manual entry (gold added or given out), for a specific karat OR as direct fine gold
+// (karat = 0 is the established sentinel for "not tied to a karat" - see AdminGoldEntry, and matches
+// how CUSTOMER_GOLD_RECOVERED entries already credit fineStock in customers/[id]/jama-gold/route.ts)
 export async function POST(request: NextRequest) {
   try {
     await requireUser(request)
@@ -73,17 +75,18 @@ export async function POST(request: NextRequest) {
 
     const karatNum = parseFloat(karat)
     const weightNum = parseFloat(weight)
+    const isFine = karatNum === 0
 
-    if (!date || !karatNum || !weightNum || weightNum <= 0) {
+    if (!date || isNaN(karatNum) || !weightNum || weightNum <= 0) {
       return NextResponse.json(
         { success: false, error: 'Date, karat, and a positive weight are required' },
         { status: 400 }
       )
     }
 
-    if (!ADMIN_STOCK_KARATS.includes(karatNum as any)) {
+    if (!isFine && !ADMIN_STOCK_KARATS.includes(karatNum as any)) {
       return NextResponse.json(
-        { success: false, error: `Invalid karat. Must be one of: ${ADMIN_STOCK_KARATS.join(', ')}` },
+        { success: false, error: `Invalid karat. Must be 0 (Fine) or one of: ${ADMIN_STOCK_KARATS.join(', ')}` },
         { status: 400 }
       )
     }
@@ -108,7 +111,7 @@ export async function POST(request: NextRequest) {
       createdAt: new Date()
     }
 
-    const fieldKey = karatFieldKey(karatNum)
+    const fieldKey = isFine ? 'fineStock' : karatFieldKey(karatNum)
     const now = new Date()
 
     await col.updateOne(
