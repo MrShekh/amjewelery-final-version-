@@ -116,3 +116,44 @@ export function calculateFineFinishedGoods(byKarat: Record<string, FinishedGoods
   })
   return parseFloat(total.toFixed(3))
 }
+
+// Same per-karat-clamped netting as Karigar Loss, but for Finished Goods - used so a "start fresh"
+// reset baseline can net out old Finished Goods too, without excluding whole orders by date (which
+// would wrongly hide brand-new activity on an order that merely happened to be created earlier).
+export function calculateNetRawFinishedGoods(
+  byKarat: Record<string, FinishedGoodsByKaratEntry>,
+  baselineByKarat: Record<string, number> = {}
+): number {
+  let total = 0
+  Object.entries(byKarat).forEach(([key, { weight }]) => {
+    const baseline = baselineByKarat[key] || 0
+    total += Math.max(0, weight - baseline)
+  })
+  return parseFloat(total.toFixed(3))
+}
+
+export function calculateNetFineFinishedGoods(
+  byKarat: Record<string, FinishedGoodsByKaratEntry>,
+  baselineByKarat: Record<string, number> = {}
+): number {
+  let total = 0
+  Object.entries(byKarat).forEach(([key, { karat, weight }]) => {
+    const baseline = baselineByKarat[key] || 0
+    const net = Math.max(0, weight - baseline)
+    total += net * (karat / 100)
+  })
+  return parseFloat(total.toFixed(3))
+}
+
+// Adds two per-karat baseline maps together (e.g. the "Clear Total Loss" ratchet + a "start fresh"
+// reset snapshot) so callers can net a live total against BOTH at once with a single combined map.
+export function combineByKaratBaselines(
+  a: Record<string, number> = {},
+  b: Record<string, number> = {}
+): Record<string, number> {
+  const result: Record<string, number> = { ...a }
+  Object.entries(b).forEach(([key, value]) => {
+    result[key] = parseFloat(((result[key] || 0) + value).toFixed(3))
+  })
+  return result
+}

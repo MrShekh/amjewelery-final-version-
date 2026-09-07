@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getInventoryCollection, getUsersCollection, getOrdersCollection, getDb } from '@/lib/mongodb'
+import { getInventoryCollection, getUsersCollection, getOrdersCollection, getDb, getAnalyticsSnapshotsCollection } from '@/lib/mongodb'
 import { AdminGoldStock, AdminGoldEntry } from '@/types/mongodb'
 import { ObjectId } from 'mongodb'
 import { verifyToken, extractTokenFromHeader } from '@/lib/jwt'
-import { calculateKarigarLossByKarat } from '@/lib/karigar-loss'
+import { calculateKarigarLossByKarat, combineByKaratBaselines } from '@/lib/karigar-loss'
 import {
     handleApiError,
     handleApiSuccess,
@@ -73,13 +73,22 @@ export async function POST(request: NextRequest) {
         // already cleared for it before. That recovered gold physically came back, so it gets
         // credited into Admin Stock for that exact karat - Total Stock stays conserved instead of
         // just vanishing.
+        //
+        // Also fold in the "start fresh" reset baseline (see /api/analytics/snapshot) - loss that was
+        // already written off by a reset was never claimed to be physically recovered, so it must not
+        // ALSO be credited into Admin Stock here just because this button gets clicked afterward.
+        const snapshotsCol = await getAnalyticsSnapshotsCollection()
+        const latestSnapshot = await snapshotsCol.findOne({}, { sort: { clearedAt: -1 } })
+        const karigarLossResetBaseline: Record<string, number> = latestSnapshot?.stockBaselineByKarat?.karigarLoss || {}
+
         const karigarLossByKarat = calculateKarigarLossByKarat(finalizedOrders as any)
         const previousClearedByKarat: Record<string, number> = inventory?.karigarLossClearedByKarat || {}
+        const effectiveClearedByKarat = combineByKaratBaselines(previousClearedByKarat, karigarLossResetBaseline)
         const newClearedByKarat: Record<string, number> = { ...previousClearedByKarat }
         const recoveredByKarat: { key: string; karat: number; amount: number }[] = []
 
         Object.entries(karigarLossByKarat).forEach(([key, { karat, rawLoss }]) => {
-            const alreadyCleared = previousClearedByKarat[key] || 0
+            const alreadyCleared = effectiveClearedByKarat[key] || 0
             // Clamp at 0: if this karat was over-cleared before (e.g. its orders got deleted after
             // clearing, so rawLoss dropped below what was already cleared), there is nothing left to
             // recover - crediting a negative amount here would incorrectly remove gold from Admin Stock.

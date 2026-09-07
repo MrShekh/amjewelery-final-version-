@@ -60,11 +60,16 @@ export async function GET(request: NextRequest) {
         const orders = await ordersCol.find({
             createdAt: { $gte: startDate, $lt: endDate }
         }, {
-            projection: { fillingIn: 1, finishWeight: 1 }
+            projection: { fillingIn: 1, finishWeight: 1, status: 1 }
         }).toArray()
 
+        // Only COMPLETED/DELIVERED orders count as realized loss - matches the "Total" toggle on the
+        // same Dashboard card (see /api/inventory), which only counts finalized orders. An order still
+        // in process just has gold sitting with the karigar, not yet lost, so it shouldn't inflate
+        // this figure while the two toggle modes are meant to be directly comparable.
         let totalLoss = 0
         orders.forEach((o: any) => {
+            if (o.status !== 'COMPLETED' && o.status !== 'DELIVERED') return
             const fIn = o.fillingIn || 0
             const fWeight = o.finishWeight || 0
             totalLoss += Math.max(0, fIn - fWeight)

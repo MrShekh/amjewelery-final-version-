@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { getInventoryCollection, getUsersCollection, getOrdersCollection, getDb } from '@/lib/mongodb'
+import { getInventoryCollection, getUsersCollection, getOrdersCollection, getDb, getAnalyticsSnapshotsCollection } from '@/lib/mongodb'
 import { toClientFormat, AdminGoldStock } from '@/types/mongodb'
 import { ObjectId } from 'mongodb'
 import { verifyToken, extractTokenFromHeader } from '@/lib/jwt'
@@ -9,8 +9,9 @@ import {
   calculateNetFineKarigarLoss,
   calculateNetRawKarigarLoss,
   calculateFinishedGoodsByKarat,
-  calculateRawFinishedGoods,
-  calculateFineFinishedGoods
+  calculateNetRawFinishedGoods,
+  calculateNetFineFinishedGoods,
+  combineByKaratBaselines
 } from '@/lib/karigar-loss'
 import {
   handleApiError,
@@ -145,6 +146,23 @@ export async function GET(request: NextRequest) {
     //  - DELIVERED (billed): Finished Goods drops out - its fine value has moved into Customer Stock
     //    (plus making charge/profit, which is new value, not gold re-appearing) via the bill route.
     //    The Karigar Loss shortfall stays booked (drives "Clear Total Loss").
+    //
+    // "Start fresh" boundary from the Analytics page's Save & Clear (see /api/analytics/snapshot).
+    // IMPORTANT: this does NOT exclude old orders by date - an order created before the reset that
+    // gets touched today (e.g. Filling In entered only now) must still be tracked in full, since that
+    // gold movement is genuinely happening today. Instead, each karat's value is frozen as a baseline
+    // at the moment of reset, and live totals are netted against it (same pattern as "Clear Total
+    // Loss"). An order with nothing recorded at reset time contributes 0 to the baseline, so anything
+    // entered on it afterward shows up in full - only the value that already existed at reset time is
+    // written off. Customer Stock and Admin Stock are untouched - they're real ledgers, not derived
+    // from order history.
+    const snapshotsCol = await getAnalyticsSnapshotsCollection()
+    const latestSnapshot = await snapshotsCol.findOne({}, { sort: { clearedAt: -1 } })
+    const stockBaseline = latestSnapshot?.stockBaselineByKarat || {}
+    const inProcessBaseline: Record<string, number> = stockBaseline.inProcess || {}
+    const finishedGoodsBaseline: Record<string, number> = stockBaseline.finishedGoods || {}
+    const karigarLossResetBaseline: Record<string, number> = stockBaseline.karigarLoss || {}
+
     const ordersCol = await getOrdersCollection()
     const allOrders = await ordersCol.find({}, { projection: { fillingIn: 1, finishWeight: 1, selectedKarat: 1, status: 1 } }).toArray()
     const isFinalized = (o: any) => o.status === 'COMPLETED' || o.status === 'DELIVERED'
@@ -152,33 +170,28 @@ export async function GET(request: NextRequest) {
     const finalizedOrders = allOrders.filter(isFinalized)
     const completedNotBilledOrders = allOrders.filter((o: any) => o.status === 'COMPLETED')
 
-    // Raw (karat-mixed) figures for display cards
-    let calculatedKarigarInProcessStock = 0
-    inProcessOrders.forEach((o: any) => {
-      const fIn = o.fillingIn || 0
-      const fWeight = o.finishWeight || 0
-      calculatedKarigarInProcessStock += Math.max(0, fIn - fWeight)
-    })
-    const karigarInProcessStock = parseFloat(Math.max(0, calculatedKarigarInProcessStock).toFixed(3))
-
     const recoveredStock = inventory.recoveredStock || 0
 
-    // Fine-gold, per-karat versions (correct per-karat conversion, same source as Analytics) - used for Total Stock.
+    // Karigar Stock (In Process) - net of the reset baseline, per karat.
     const karigarInProcessByKarat = calculateKarigarLossByKarat(inProcessOrders as any)
-    const karigarInProcessStockFine = Math.max(0, calculateNetFineKarigarLoss(karigarInProcessByKarat, {}))
+    const karigarInProcessStock = calculateNetRawKarigarLoss(karigarInProcessByKarat, inProcessBaseline)
+    const karigarInProcessStockFine = calculateNetFineKarigarLoss(karigarInProcessByKarat, inProcessBaseline)
 
-    // Net of whatever has already been "recovered" (cleared) per karat - see clear-karigar-loss route.
-    // Netting is done PER KARAT (clamped at 0 each) before combining, so a karat that was over-cleared
-    // in the past (e.g. its orders were later deleted) can't cancel out genuine new loss in another karat.
+    // Karigar Loss - net of BOTH whatever has already been "recovered" via Clear Total Loss AND the
+    // reset baseline (old, written-off loss should never separately be "recovered" into Admin Stock
+    // either). Netting is done PER KARAT (clamped at 0 each) before combining, so a karat that was
+    // over-cleared in the past (e.g. its orders were later deleted) can't cancel out genuine new loss
+    // in another karat.
     const karigarLossByKarat = calculateKarigarLossByKarat(finalizedOrders as any)
-    const clearedByKarat = inventory.karigarLossClearedByKarat || {}
+    const clearedByKarat = combineByKaratBaselines(inventory.karigarLossClearedByKarat || {}, karigarLossResetBaseline)
     const karigarLossStock = calculateNetRawKarigarLoss(karigarLossByKarat, clearedByKarat)
     const karigarLossStockFine = calculateNetFineKarigarLoss(karigarLossByKarat, clearedByKarat)
 
-    // Finished Goods (Awaiting Bill): Finish Weight itself, for COMPLETED-but-not-yet-DELIVERED orders
+    // Finished Goods (Awaiting Bill) - Finish Weight for COMPLETED-but-not-yet-DELIVERED orders,
+    // net of the reset baseline, per karat.
     const finishedGoodsByKarat = calculateFinishedGoodsByKarat(completedNotBilledOrders as any)
-    const finishedGoodsAwaitingBillStock = calculateRawFinishedGoods(finishedGoodsByKarat)
-    const finishedGoodsAwaitingBillStockFine = calculateFineFinishedGoods(finishedGoodsByKarat)
+    const finishedGoodsAwaitingBillStock = calculateNetRawFinishedGoods(finishedGoodsByKarat, finishedGoodsBaseline)
+    const finishedGoodsAwaitingBillStockFine = calculateNetFineFinishedGoods(finishedGoodsByKarat, finishedGoodsBaseline)
 
     // Admin Stock: karat-wise ledger converted to fine gold
     const db = await getDb()
