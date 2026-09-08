@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getOrdersCollection, getCustomersCollection, getManufacturingProcessesCollection, getGoldTransactionsCollection, getInventoryCollection, getKarigarsCollection, getCustomerJamaBalancesCollection, getUsersCollection } from '@/lib/mongodb'
+import { getOrdersCollection, getCustomersCollection, getManufacturingProcessesCollection, getGoldTransactionsCollection, getInventoryCollection, getKarigarsCollection, getCustomerJamaBalancesCollection, getUsersCollection, getAnalyticsSnapshotsCollection } from '@/lib/mongodb'
 import { Order, OrderStatus, TransactionType, GoldTransaction, toClientFormat } from '@/types/mongodb'
 import { ObjectId } from 'mongodb'
 import { verifyToken, extractTokenFromHeader } from '@/lib/jwt'
@@ -22,7 +22,6 @@ export async function GET(request: NextRequest) {
   const search = searchParams.get('search') || ''
   const dateFilter = searchParams.get('dateFilter') || 'all'
   const karatFilter = searchParams.get('karatFilter') || 'all'
-  const clearedAfter = searchParams.get('clearedAfter') // ISO timestamp — analytics clear boundary
 
   const page = Math.max(parseInt(pageParam, 10) || 1, 1)
   const limit = Math.max(Math.min(parseInt(limitParam, 10) || 10, 100), 1)
@@ -145,22 +144,12 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Apply clearedAfter boundary (analytics reset): only count orders CREATED after this date.
-    // This must key off createdAt (not `dateField`, which for analytics is updatedAt) - otherwise
-    // an old order that merely gets edited again after the clear (e.g. a later register update)
-    // would have its updatedAt pushed past the boundary and reappear, even though it isn't new.
-    if (clearedAfter) {
-      const clearedAfterDate = new Date(clearedAfter)
-      if (!isNaN(clearedAfterDate.getTime())) {
-        if (filter.createdAt && filter.createdAt.$gte) {
-          if (clearedAfterDate > filter.createdAt.$gte) {
-            filter.createdAt.$gte = clearedAfterDate
-          }
-        } else {
-          filter.createdAt = { ...filter.createdAt, $gte: clearedAfterDate }
-        }
-      }
-    }
+    // NOTE: the Analytics "Save & Clear" reset boundary is intentionally NOT applied as a createdAt
+    // filter here anymore - that used to exclude whole orders created before the reset, which wrongly
+    // hid brand-new activity (e.g. Filling In entered today) on any order that merely happened to be
+    // created earlier. Instead, each order's numeric fields are netted against a per-order snapshot
+    // taken at reset time (see below, and /api/analytics/snapshot) - the same fix already applied to
+    // the Dashboard's stock cards.
 
     console.log(`[${requestId}] Query filter:`, filter)
 
@@ -259,6 +248,24 @@ export async function GET(request: NextRequest) {
       }
     }).toArray()
 
+    // Analytics reset baseline: a per-order snapshot of these same numeric fields, taken at the
+    // moment of the last "Save & Clear" (see /api/analytics/snapshot). Netting each order's current
+    // value against its own snapshot (defaulting to 0 for an order that didn't exist yet, or was
+    // never touched) gives "activity since the reset" without excluding any order outright - an order
+    // created before the reset but filled in today still counts in full for what changed today.
+    let orderFieldSnapshots: Record<string, Record<string, number>> = {}
+    if (forAnalytics) {
+      const snapshotsCol = await getAnalyticsSnapshotsCollection()
+      const latestSnapshot = await snapshotsCol.findOne({}, { sort: { clearedAt: -1 } })
+      orderFieldSnapshots = latestSnapshot?.orderFieldSnapshots || {}
+    }
+
+    const netOrderField = (order: any, field: string): number => {
+      const current = order[field] || 0
+      const baseline = orderFieldSnapshots[order._id.toString()]?.[field] || 0
+      return current - baseline
+    }
+
     const totals = {
       fillingIn: 0,
       fillingOut: 0,
@@ -298,15 +305,25 @@ export async function GET(request: NextRequest) {
     const polishKarigarLosses: Record<string, Record<string, number>> = {}
 
     allOrdersForTotals.forEach((o: any) => {
-      totals.fillingIn += o.fillingIn || 0
-      totals.fillingOut += o.fillingOut || 0
-      totals.fillingLoss += o.fillingLoss || 0
-      totals.settingLoss += o.settingLoss || 0
-      totals.ad += o.ad || 0
-      totals.klStone += o.klStone || 0
-      totals.polishLoss += o.polishLoss || 0
-      totals.finishWeight += o.finishWeight || 0
-      totals.makingCharge += o.makingCharge || 0
+      const fillingIn = netOrderField(o, 'fillingIn')
+      const fillingOut = netOrderField(o, 'fillingOut')
+      const fillingLoss = netOrderField(o, 'fillingLoss')
+      const settingLoss = netOrderField(o, 'settingLoss')
+      const ad = netOrderField(o, 'ad')
+      const klStone = netOrderField(o, 'klStone')
+      const polishLoss = netOrderField(o, 'polishLoss')
+      const finishWeight = netOrderField(o, 'finishWeight')
+      const makingCharge = netOrderField(o, 'makingCharge')
+
+      totals.fillingIn += fillingIn
+      totals.fillingOut += fillingOut
+      totals.fillingLoss += fillingLoss
+      totals.settingLoss += settingLoss
+      totals.ad += ad
+      totals.klStone += klStone
+      totals.polishLoss += polishLoss
+      totals.finishWeight += finishWeight
+      totals.makingCharge += makingCharge
 
       const karatLabel = getKaratLabel(o.selectedKarat)
 
@@ -315,10 +332,10 @@ export async function GET(request: NextRequest) {
         if (fk) {
           uniqueFillingKarigars.add(fk)
           if (!fillingKarigarLosses[karatLabel]) fillingKarigarLosses[karatLabel] = {}
-          fillingKarigarLosses[karatLabel][fk] = (fillingKarigarLosses[karatLabel][fk] || 0) + (o.fillingLoss || 0)
+          fillingKarigarLosses[karatLabel][fk] = (fillingKarigarLosses[karatLabel][fk] || 0) + fillingLoss
 
           if (!fillingKarigarIn[karatLabel]) fillingKarigarIn[karatLabel] = {}
-          fillingKarigarIn[karatLabel][fk] = (fillingKarigarIn[karatLabel][fk] || 0) + (o.fillingIn || 0)
+          fillingKarigarIn[karatLabel][fk] = (fillingKarigarIn[karatLabel][fk] || 0) + fillingIn
         }
       }
       if (o.settingKarigar) {
@@ -326,7 +343,7 @@ export async function GET(request: NextRequest) {
         if (sk) {
           uniqueSettingKarigars.add(sk)
           if (!settingKarigarLosses[karatLabel]) settingKarigarLosses[karatLabel] = {}
-          settingKarigarLosses[karatLabel][sk] = (settingKarigarLosses[karatLabel][sk] || 0) + (o.settingLoss || 0)
+          settingKarigarLosses[karatLabel][sk] = (settingKarigarLosses[karatLabel][sk] || 0) + settingLoss
         }
       }
       if (o.polishKarigar) {
@@ -334,7 +351,7 @@ export async function GET(request: NextRequest) {
         if (pk) {
           uniquePolishKarigars.add(pk)
           if (!polishKarigarLosses[karatLabel]) polishKarigarLosses[karatLabel] = {}
-          polishKarigarLosses[karatLabel][pk] = (polishKarigarLosses[karatLabel][pk] || 0) + (o.polishLoss || 0)
+          polishKarigarLosses[karatLabel][pk] = (polishKarigarLosses[karatLabel][pk] || 0) + polishLoss
         }
       }
     })
@@ -394,8 +411,8 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      const fIn = o.fillingIn || 0
-      const fWeight = o.finishWeight || 0
+      const fIn = netOrderField(o, 'fillingIn')
+      const fWeight = netOrderField(o, 'finishWeight')
       const loss = parseFloat((fIn - fWeight).toFixed(3))
 
       karatTotals[karatKey].fillingIn += fIn

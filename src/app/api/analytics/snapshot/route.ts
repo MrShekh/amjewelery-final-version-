@@ -34,14 +34,19 @@ export async function GET(request: NextRequest) {
     })
 }
 
-// POST /api/analytics/snapshot — records a new clear date, AND snapshots per-karat stock baselines
-// (In-Process, Finished Goods Awaiting Bill, Karigar Loss) from every order that exists right now.
-// This is what makes "start fresh" work correctly for the Dashboard's stock cards too: rather than
-// excluding old ORDERS by date (which would wrongly hide brand-new activity - e.g. Filling In
-// entered today - on an order that merely happened to be created before the reset), we freeze each
-// karat's CURRENT value as a baseline and net live totals against it going forward. An order with
-// nothing recorded yet contributes 0 to the baseline, so anything entered on it after this point
-// shows up in full, exactly like a real new order would.
+// Numeric register fields snapshotted per-order, so Analytics (see /api/orders GET) can net each
+// order's CURRENT value against what it was at the moment of the reset - same field set the register
+// itself edits (see numericFields in /api/orders/[id] PUT).
+const ANALYTICS_NUMERIC_FIELDS = ['fillingIn', 'fillingOut', 'fillingLoss', 'settingLoss', 'ad', 'klStone', 'polishLoss', 'finishWeight', 'makingCharge'] as const
+
+// POST /api/analytics/snapshot — records a new clear date, AND snapshots baselines from every order
+// that exists right now: per-karat stock baselines (In-Process, Finished Goods Awaiting Bill, Karigar
+// Loss) for the Dashboard, and per-order field baselines for Analytics. This is what makes "start
+// fresh" work correctly everywhere: rather than excluding old ORDERS outright (which would wrongly
+// hide brand-new activity - e.g. Filling In entered today - on an order that merely happened to be
+// created earlier), we freeze the CURRENT value as a baseline and net live totals against it going
+// forward. An order with nothing recorded yet contributes 0 to the baseline, so anything entered on
+// it after this point shows up in full, exactly like a real new order would.
 export async function POST(request: NextRequest) {
     const user = await authenticate(request)
     if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
@@ -50,7 +55,12 @@ export async function POST(request: NextRequest) {
     const col = await getAnalyticsSnapshotsCollection()
     const ordersCol = await getOrdersCollection()
 
-    const allOrders = await ordersCol.find({}, { projection: { fillingIn: 1, finishWeight: 1, selectedKarat: 1, status: 1 } }).toArray()
+    const allOrders = await ordersCol.find({}, {
+        projection: {
+            fillingIn: 1, fillingOut: 1, fillingLoss: 1, settingLoss: 1, ad: 1, klStone: 1,
+            polishLoss: 1, finishWeight: 1, makingCharge: 1, selectedKarat: 1, status: 1
+        }
+    }).toArray()
     const isFinalized = (o: any) => o.status === 'COMPLETED' || o.status === 'DELIVERED'
     const inProcessOrders = allOrders.filter((o: any) => !isFinalized(o))
     const finalizedOrders = allOrders.filter(isFinalized)
@@ -70,11 +80,21 @@ export async function POST(request: NextRequest) {
         karigarLoss: toFlatMap(calculateKarigarLossByKarat(finalizedOrders as any)),
     }
 
+    const orderFieldSnapshots: Record<string, Record<string, number>> = {}
+    allOrders.forEach((o: any) => {
+        const fields: Record<string, number> = {}
+        ANALYTICS_NUMERIC_FIELDS.forEach((field) => {
+            fields[field] = o[field] || 0
+        })
+        orderFieldSnapshots[o._id.toString()] = fields
+    })
+
     await col.insertOne({
         clearedAt: now,
         savedBy: user.email,
         createdAt: now,
         stockBaselineByKarat,
+        orderFieldSnapshots,
     })
 
     return NextResponse.json({ clearedAt: now, message: 'Analytics cleared successfully', stockBaselineByKarat })
