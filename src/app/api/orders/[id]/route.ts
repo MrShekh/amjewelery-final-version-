@@ -525,23 +525,20 @@ export async function DELETE(
       console.log(`Restored ${extraFineGoldAmount.toFixed(3)}g fine gold (${totalExtraStockToRestore.toFixed(3)}g at ${karatPurity}%) to extra stock`)
     }
 
-    // Restore Admin Stock at the order's karat - the amount depends on how far the order got:
-    //  - CREATED/IN_PROCESS: nothing has been produced yet, so the full Filling In (gold sitting
-    //    with the karigar) comes back, exactly as it left.
-    //  - COMPLETED (not yet billed): Finish Weight is a real, finished piece - deleting the order
-    //    melts it back into raw Admin Stock. We restore Finish Weight, NOT Filling In: the
-    //    fillingIn-finishWeight shortfall is a real, permanent loss (dust/wastage) that doesn't
-    //    come back just because the order record is deleted - whether or not it was already
-    //    "cleared" via Clear Total Loss (restoring the full Filling In here would double-credit
-    //    Admin Stock for loss that was already compensated).
-    //  - DELIVERED: the piece is already with the customer and billed - nothing to restore here,
-    //    the DELIVERED-specific billing reversal above already handles that side.
-    let amountToRestore = 0
-    if (existingOrder.status === 'COMPLETED') {
-      amountToRestore = existingOrder.finishWeight || 0
-    } else if (existingOrder.status !== 'DELIVERED') {
-      amountToRestore = existingOrder.fillingIn || 0
-    }
+    // Restore Admin Stock at the order's karat.
+    // We ALWAYS restore fillingIn (the gold that actually left admin stock when the
+    // order was issued to the karigar), regardless of whether finishWeight was entered.
+    //
+    // Rationale: admin stock was debited by fillingIn when the order was saved. That
+    // is the only physical gold movement that needs reversing. The karigar loss
+    // (fillingIn - finishWeight) is real manufacturing wastage — it does not
+    // magically reappear just because the order record is deleted, so we must NOT
+    // return only finishWeight (that would silently write off the loss from admin stock).
+    //
+    //  - CREATED / IN_PROCESS / COMPLETED: restore fillingIn ✅
+    //  - DELIVERED: the DELIVERED-specific billing reversal above already handles
+    //    the customer/advance side; we still restore fillingIn for admin stock ✅
+    let amountToRestore = existingOrder.fillingIn || 0
     let adminStockRestored = 0
 
     if (amountToRestore !== 0 && ADMIN_STOCK_KARATS.includes(karatPurity as any)) {
@@ -558,14 +555,13 @@ export async function DELETE(
 
       const now = new Date()
       const fieldKey = karatFieldKey(karatPurity)
-      const restoredFieldLabel = existingOrder.status === 'COMPLETED' ? 'Finish Weight' : 'Filling In'
       const adminEntry: AdminGoldEntry = {
         _id: new ObjectId(),
         date: now,
         karat: karatPurity,
         weight: amountToRestore, // positive = gold returned to admin stock
         type: 'ORDER_DELETED',
-        description: `Order ${existingOrder.orderName || existingOrder.orderNumber || id} deleted - ${restoredFieldLabel} ${amountToRestore.toFixed(3)}g returned (${karatPurity}K)`,
+        description: `Order ${existingOrder.orderName || existingOrder.orderNumber || id} deleted - Filling In ${amountToRestore.toFixed(3)}g returned to Admin Stock (${karatPurity}K)`,
         orderId: id,
         createdAt: now
       }

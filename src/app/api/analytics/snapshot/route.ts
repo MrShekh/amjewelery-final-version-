@@ -80,8 +80,19 @@ export async function POST(request: NextRequest) {
         karigarLoss: toFlatMap(calculateKarigarLossByKarat(finalizedOrders as any)),
     }
 
+    // Only snapshot FINALIZED orders (COMPLETED / DELIVERED).
+    // In-progress orders intentionally get NO snapshot entry so their baseline
+    // defaults to 0 in the analytics net calculation. This means:
+    //   • An order finished BEFORE this clear → fully excluded from the new period ✅
+    //   • An order in-progress AT clear time → carries over in full to the new
+    //     period, and its eventual karigar loss is counted correctly ✅
+    //   • A brand-new order created AFTER clear → baseline 0, counted in full ✅
     const orderFieldSnapshots: Record<string, Record<string, number>> = {}
     allOrders.forEach((o: any) => {
+        if (o.status !== 'COMPLETED' && o.status !== 'DELIVERED') {
+            // In-progress: leave out of snapshot so it carries over to the next period
+            return
+        }
         const fields: Record<string, number> = {}
         ANALYTICS_NUMERIC_FIELDS.forEach((field) => {
             fields[field] = o[field] || 0
