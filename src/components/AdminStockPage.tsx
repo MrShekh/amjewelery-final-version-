@@ -9,7 +9,9 @@ interface AdminGoldEntry {
     date: Date | string
     karat: number
     weight: number // signed: positive = added, negative = removed
-    type: 'MANUAL' | 'ORDER_COMPLETE' | 'ORDER_FILLING' | 'ORDER_DELETED' | 'KARIGAR_LOSS_RECOVERED' | 'CUSTOMER_GOLD_RECOVERED' | 'FINE_TO_KARAT'
+    type: 'MANUAL' | 'ORDER_COMPLETE' | 'ORDER_FILLING' | 'ORDER_DELETED' | 'KARIGAR_LOSS_RECOVERED' | 'CUSTOMER_GOLD_RECOVERED' | 'FINE_TO_KARAT' | 'GOLD_SOLD'
+    amountReceived?: number
+    buyerName?: string
     description?: string
     orderId?: string
     createdAt: Date | string
@@ -38,7 +40,8 @@ const ENTRY_TYPE_LABELS: Record<AdminGoldEntry['type'], string> = {
     ORDER_DELETED: 'Order Deleted (Returned)',
     KARIGAR_LOSS_RECOVERED: 'Recovered from Karigar Loss',
     CUSTOMER_GOLD_RECOVERED: 'Recovered from Customer',
-    FINE_TO_KARAT: 'Fine → Karat Conversion'
+    FINE_TO_KARAT: 'Fine → Karat Conversion',
+    GOLD_SOLD: 'Gold Sold'
 }
 
 const KARAT_OPTIONS = [92, 88, 84, 80, 76, 75.5, 75, 59, 37.5]
@@ -49,6 +52,7 @@ const AdminStockPage = () => {
     const [loading, setLoading] = useState(true)
     const [showAddForm, setShowAddForm] = useState(false)
     const [showConvertForm, setShowConvertForm] = useState(false)
+    const [showSellForm, setShowSellForm] = useState(false)
 
     const [formDate, setFormDate] = useState(() => new Date().toISOString().split('T')[0])
     const [formKarat, setFormKarat] = useState<number>(92)
@@ -62,6 +66,15 @@ const AdminStockPage = () => {
     const [convertFineAmount, setConvertFineAmount] = useState<string>('')
     const [convertDescription, setConvertDescription] = useState<string>('')
     const [converting, setConverting] = useState(false)
+
+    // Sell Gold form state
+    const [sellDate, setSellDate] = useState(() => new Date().toISOString().split('T')[0])
+    const [sellKarat, setSellKarat] = useState<number>(92)
+    const [sellWeight, setSellWeight] = useState<string>('')
+    const [sellAmount, setSellAmount] = useState<string>('')
+    const [sellBuyer, setSellBuyer] = useState<string>('')
+    const [sellNote, setSellNote] = useState<string>('')
+    const [selling, setSelling] = useState(false)
 
     const fetchAdminStock = async () => {
         try {
@@ -134,6 +147,59 @@ const AdminStockPage = () => {
         }
     }
 
+    const handleSellGold = async (e: React.FormEvent) => {
+        e.preventDefault()
+
+        if (!sellWeight || parseFloat(sellWeight) <= 0) {
+            alert('Please enter a valid weight to sell')
+            return
+        }
+        if (!sellAmount || parseFloat(sellAmount) < 0) {
+            alert('Please enter the amount received (can be 0)')
+            return
+        }
+
+        try {
+            setSelling(true)
+            const token = localStorage.getItem('sessionToken')
+
+            const response = await fetch('/api/admin-stock/sell', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    date: sellDate,
+                    karat: sellKarat,
+                    weightSold: parseFloat(sellWeight),
+                    amountReceived: parseFloat(sellAmount),
+                    buyerName: sellBuyer,
+                    description: sellNote
+                })
+            })
+
+            if (response.ok) {
+                const data = await response.json()
+                setSellWeight('')
+                setSellAmount('')
+                setSellBuyer('')
+                setSellNote('')
+                setShowSellForm(false)
+                fetchAdminStock()
+                alert(data.message)
+            } else {
+                const error = await response.json()
+                alert(`Failed: ${error.error}`)
+            }
+        } catch (error) {
+            console.error('Error recording gold sale:', error)
+            alert('Failed to record gold sale')
+        } finally {
+            setSelling(false)
+        }
+    }
+
     const handleConvertFineToKarat = async (e: React.FormEvent) => {
         e.preventDefault()
 
@@ -203,18 +269,24 @@ const AdminStockPage = () => {
                     <h1 className="text-3xl font-bold text-gray-900">Admin Stock</h1>
                     <p className="text-gray-600 mt-1">Karat-wise gold on hand, converted to fine gold</p>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex gap-3 flex-wrap">
                     <button
-                        onClick={() => { setShowConvertForm(false); setShowAddForm(!showAddForm) }}
+                        onClick={() => { setShowConvertForm(false); setShowSellForm(false); setShowAddForm(!showAddForm) }}
                         className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium"
                     >
                         {showAddForm ? 'Cancel' : 'Add / Remove Gold'}
                     </button>
                     <button
-                        onClick={() => { setShowAddForm(false); setShowConvertForm(!showConvertForm) }}
+                        onClick={() => { setShowAddForm(false); setShowSellForm(false); setShowConvertForm(!showConvertForm) }}
                         className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-medium"
                     >
                         {showConvertForm ? 'Cancel' : 'Convert Fine → Karat'}
+                    </button>
+                    <button
+                        onClick={() => { setShowAddForm(false); setShowConvertForm(false); setShowSellForm(!showSellForm) }}
+                        className="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg font-medium"
+                    >
+                        {showSellForm ? 'Cancel' : '💰 Sell Gold'}
                     </button>
                 </div>
             </div>
@@ -382,6 +454,129 @@ const AdminStockPage = () => {
                 </div>
             )}
 
+            {/* ─── Sell Gold Form ─── */}
+            {showSellForm && (
+                <div className="bg-white p-6 rounded-lg shadow-md border border-rose-200">
+                    <h2 className="text-xl font-semibold text-gray-900 mb-1 flex items-center gap-2">
+                        <span className="text-2xl">💰</span> Sell Gold
+                    </h2>
+                    <p className="text-sm text-gray-500 mb-4">
+                        Record a direct gold sale. The sold weight will be deducted from admin stock immediately.
+                    </p>
+                    <form onSubmit={handleSellGold} className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                                <input
+                                    type="date"
+                                    value={sellDate}
+                                    onChange={(e) => setSellDate(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-rose-500"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Karat (Purity)</label>
+                                <select
+                                    value={sellKarat}
+                                    onChange={(e) => setSellKarat(parseFloat(e.target.value))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-rose-500"
+                                    required
+                                >
+                                    <option value={0}>Fine (direct fine gold)</option>
+                                    {KARAT_OPTIONS.map(k => (
+                                        <option key={k} value={k}>{k}% Gold</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Weight Sold (grams)</label>
+                                <input
+                                    type="number"
+                                    step="0.001"
+                                    min="0.001"
+                                    value={sellWeight}
+                                    onChange={(e) => setSellWeight(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-rose-500"
+                                    placeholder="0.000"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Amount Received (₹)</label>
+                                <input
+                                    type="number"
+                                    step="1"
+                                    min="0"
+                                    value={sellAmount}
+                                    onChange={(e) => setSellAmount(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-rose-500"
+                                    placeholder="e.g. 85000"
+                                    required
+                                />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Buyer Name <span className="text-gray-400">(optional)</span></label>
+                                <input
+                                    type="text"
+                                    value={sellBuyer}
+                                    onChange={(e) => setSellBuyer(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-rose-500"
+                                    placeholder="e.g. Ramesh Jewellers"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Notes <span className="text-gray-400">(optional)</span></label>
+                                <input
+                                    type="text"
+                                    value={sellNote}
+                                    onChange={(e) => setSellNote(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-rose-500"
+                                    placeholder="Any additional notes..."
+                                />
+                            </div>
+                        </div>
+
+                        {/* Live summary */}
+                        {sellWeight && sellAmount && !isNaN(parseFloat(sellWeight)) && !isNaN(parseFloat(sellAmount)) && (
+                            <div className="p-4 bg-rose-50 border border-rose-200 rounded-lg">
+                                <p className="text-sm font-semibold text-rose-800 mb-1">Sale Summary</p>
+                                <div className="grid grid-cols-3 gap-4 text-sm text-rose-700">
+                                    <div>
+                                        <span className="block text-xs text-rose-500 uppercase tracking-wide">Gold</span>
+                                        <span className="font-bold text-lg">{parseFloat(sellWeight).toFixed(3)}g</span>
+                                        <span className="text-xs ml-1">{sellKarat === 0 ? 'Fine' : `${sellKarat}%`}</span>
+                                    </div>
+                                    <div>
+                                        <span className="block text-xs text-rose-500 uppercase tracking-wide">Amount</span>
+                                        <span className="font-bold text-lg">₹{parseFloat(sellAmount).toLocaleString('en-IN')}</span>
+                                    </div>
+                                    <div>
+                                        <span className="block text-xs text-rose-500 uppercase tracking-wide">Rate / gram</span>
+                                        <span className="font-bold text-lg">
+                                            {parseFloat(sellWeight) > 0
+                                                ? `₹${(parseFloat(sellAmount) / parseFloat(sellWeight)).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+                                                : '—'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        <button
+                            type="submit"
+                            disabled={selling}
+                            className="bg-rose-600 hover:bg-rose-700 text-white px-6 py-2 rounded-lg font-medium disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {selling ? 'Recording Sale...' : '💰 Record Sale & Deduct Stock'}
+                        </button>
+                    </form>
+                </div>
+            )}
+
             {/* Stock by Karat */}
             <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
                 <h2 className="text-xl font-semibold text-gray-900 mb-4">Stock by Karat</h2>
@@ -398,6 +593,74 @@ const AdminStockPage = () => {
                     })}
                 </div>
             </div>
+
+            {/* Gold Sales History */}
+            {(() => {
+                const salesEntries = (adminStock?.entries || []).filter((e: any) => e.type === 'GOLD_SOLD')
+                    .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                const totalSoldGrams = salesEntries.reduce((s: number, e: any) => s + Math.abs(e.weight), 0)
+                const totalReceived = salesEntries.reduce((s: number, e: any) => s + (e.amountReceived || 0), 0)
+
+                if (salesEntries.length === 0) return null
+
+                return (
+                    <div className="bg-white p-6 rounded-lg shadow-md border border-rose-200">
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
+                                <span className="text-xl">💰</span> Gold Sales History
+                            </h2>
+                            <div className="flex gap-4 text-sm">
+                                <span className="bg-rose-100 text-rose-800 px-3 py-1 rounded-full font-semibold">
+                                    Total Sold: {totalSoldGrams.toFixed(3)}g
+                                </span>
+                                <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full font-semibold">
+                                    Total Received: ₹{totalReceived.toLocaleString('en-IN')}
+                                </span>
+                            </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead>
+                                    <tr className="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wider border-b">
+                                        <th className="px-4 py-3">Date</th>
+                                        <th className="px-4 py-3">Gold</th>
+                                        <th className="px-4 py-3">Weight Sold</th>
+                                        <th className="px-4 py-3">Amount (₹)</th>
+                                        <th className="px-4 py-3">Rate/g</th>
+                                        <th className="px-4 py-3">Buyer / Notes</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {salesEntries.map((entry: any, idx: number) => (
+                                        <tr key={entry._id || idx} className="hover:bg-rose-50 transition-colors">
+                                            <td className="px-4 py-3 text-gray-700">
+                                                {new Date(entry.date).toLocaleDateString('en-IN')}
+                                            </td>
+                                            <td className="px-4 py-3 font-medium text-gray-900">
+                                                {entry.karat === 0 ? 'Fine Gold' : `${entry.karat}% Gold`}
+                                            </td>
+                                            <td className="px-4 py-3 font-bold text-rose-600">
+                                                {Math.abs(entry.weight).toFixed(3)}g
+                                            </td>
+                                            <td className="px-4 py-3 font-bold text-green-700">
+                                                ₹{(entry.amountReceived || 0).toLocaleString('en-IN')}
+                                            </td>
+                                            <td className="px-4 py-3 text-gray-600">
+                                                {Math.abs(entry.weight) > 0
+                                                    ? `₹${((entry.amountReceived || 0) / Math.abs(entry.weight)).toLocaleString('en-IN', { maximumFractionDigits: 0 })}/g`
+                                                    : '—'}
+                                            </td>
+                                            <td className="px-4 py-3 text-gray-500 max-w-xs truncate">
+                                                {entry.buyerName && <span className="font-medium text-gray-700 mr-1">{entry.buyerName}</span>}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )
+            })()}
 
             {/* Entry History */}
             <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
