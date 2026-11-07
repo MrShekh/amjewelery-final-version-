@@ -66,8 +66,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Optional search: bill number, customer name, or order name
-    if (search) {
-      const searchRegex = new RegExp(search, 'i')
+    if (search.trim()) {
+      const searchRegex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
 
       // Find customers whose name matches search
       const matchingCustomers = await customersCol.find(

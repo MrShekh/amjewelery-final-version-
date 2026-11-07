@@ -74,7 +74,9 @@ export default function ProductionRegisterPage() {
   // Debounce search input
   useEffect(() => {
     const handler = setTimeout(() => {
-      setDebouncedSearch(search)
+      setDebouncedSearch(search.trim())
+      // Always go back to the first page for a new search, otherwise results can appear empty
+      setPagination((prev) => (prev.page === 1 ? prev : { ...prev, page: 1 }))
     }, 300)
     return () => clearTimeout(handler)
   }, [search])

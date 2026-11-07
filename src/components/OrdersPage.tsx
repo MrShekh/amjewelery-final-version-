@@ -41,7 +41,7 @@ const OrdersPage = () => {
   const [totalOrders, setTotalOrders] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
 
-  const fetchOrders = async (page = 1) => {
+  const fetchOrders = async (page = 1, searchOverride?: string) => {
     try {
       setLoading(true)
       const token = typeof window !== 'undefined' ? localStorage.getItem('sessionToken') : null
@@ -50,14 +50,15 @@ const OrdersPage = () => {
         throw new Error('No authentication token found')
       }
 
+      const activeSearch = (searchOverride !== undefined ? searchOverride : searchQuery).trim()
       const params = new URLSearchParams()
       params.set('page', page.toString())
       params.set('limit', pageSize.toString())
       if (filter !== 'ALL') {
         params.set('status', filter)
       }
-      if (searchQuery) {
-        params.set('search', searchQuery)
+      if (activeSearch) {
+        params.set('search', activeSearch)
       }
 
       const url = `/api/orders?${params.toString()}`
@@ -161,60 +162,23 @@ const OrdersPage = () => {
             Search
           </button>
         </form>
-        {searchQuery && (
+        {searchQuery.trim() && (
           <div className="mt-2 text-sm text-gray-600 flex items-center">
             {loading ? (
               <span>Searching...</span>
             ) : (
               <>
-                Found {totalOrders} order{totalOrders !== 1 ? 's' : ''} matching "{searchQuery}"
+                Found {totalOrders} order{totalOrders !== 1 ? 's' : ''} matching "{searchQuery.trim()}"
                 <button
+                  type="button"
                   onClick={() => {
                     setSearchQuery('')
-                    // We need to trigger a fetch with empty search, but state update is async.
-                    // Ideally we'd use a useEffect or pass empty string directly.
-                    // For simplicity, we'll just clear state and let the user re-search or rely on a separate effect if we wanted auto-clear.
-                    // But user asked for manual search. So let's just clear the input.
-                    // If they want to see all orders again, they can clear and hit search/enter.
-                    // Actually, usually "Clear" button should reset the list too.
-                    // Let's make it clear and fetch.
-                    // Since setSearchQuery is async, we can't call fetchOrders immediately with the new state unless we pass it as arg.
-                    // But fetchOrders uses state. Let's just reload the page or trigger a fetch with empty param override.
-                    // Simpler: Just clear the input. The user can hit Enter to reset.
-                    // OR: We can force a reset.
+                    setCurrentPage(1)
+                    fetchOrders(1, '')
                   }}
-                  className="ml-2 text-blue-600 hover:text-blue-800 font-medium"
+                  className="ml-4 text-blue-600 hover:text-blue-800 font-medium text-xs underline"
                 >
-                  Clear Input
-                </button>
-                <button
-                  onClick={() => {
-                    setSearchQuery('')
-                    // Hack to fetch all immediately
-                    setTimeout(() => {
-                      const token = typeof window !== 'undefined' ? localStorage.getItem('sessionToken') : null
-                      if (token) {
-                        setLoading(true)
-                        const params = new URLSearchParams()
-                        params.set('page', '1')
-                        params.set('limit', pageSize.toString())
-                        if (filter !== 'ALL') params.set('status', filter)
-                        // No search param
-                        fetch(`/api/orders?${params.toString()}`, { headers: { 'Authorization': `Bearer ${token}` } })
-                          .then(res => res.json())
-                          .then(data => {
-                            const payload = data.data || data
-                            setOrders(payload.orders || [])
-                            setTotalOrders(payload.totalCount || (payload.orders || []).length)
-                            setTotalPages(payload.totalPages || 1)
-                            setLoading(false)
-                          })
-                      }
-                    }, 0)
-                  }}
-                  className="ml-4 text-gray-500 hover:text-gray-700 text-xs underline"
-                >
-                  Reset List
+                  Clear search
                 </button>
               </>
             )}
@@ -299,7 +263,7 @@ const OrdersPage = () => {
                           {order.customer.name}
                         </div>
                         <div className="text-xs text-gray-500">
-                          {order.orderType.replace('_', ' ')} •
+                          {order.orderType.replace('_', ' ')} â€¢
                           {(order.status === 'COMPLETED' || order.status === 'DELIVERED') && order.actualFinalWeight
                             ? `${order.actualFinalWeight.toFixed(2)}g actual`
                             : `${order.finalJewelryWeight.toFixed(2)}g final`
@@ -320,7 +284,7 @@ const OrdersPage = () => {
                       Total: {order.totalGoldUsed.toFixed(2)}g
                     </div>
                     <div className="text-xs text-gray-500">
-                      Customer: {order.customerGoldWeight.toFixed(2)}g • Admin: {order.adminGoldWeight.toFixed(2)}g
+                      Customer: {order.customerGoldWeight.toFixed(2)}g â€¢ Admin: {order.adminGoldWeight.toFixed(2)}g
                     </div>
                     {totalLoss > 0 && (
                       <div className="text-xs text-red-500">

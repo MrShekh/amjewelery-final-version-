@@ -83,8 +83,9 @@ export async function GET(request: NextRequest) {
     }
 
     // Apply search on order fields and customer name
-    if (search) {
-      const searchRegex = new RegExp(search, 'i')
+    if (search.trim()) {
+      // Escape regex special characters so inputs like "(", "+", "*" or "\" don't break the search
+      const searchRegex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
 
       // Find customers matching search to filter by customerId
       const matchingCustomers = await customersCol.find(

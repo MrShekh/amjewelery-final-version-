@@ -79,8 +79,8 @@ export async function GET(request: NextRequest) {
 
     // Build filter for search (name/phone/email/address)
     const filter: any = {}
-    if (search) {
-      const regex = new RegExp(search, 'i')
+    if (search.trim()) {
+      const regex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
       filter.$or = [
         { name: { $regex: regex } },
         { phone: { $regex: regex } },

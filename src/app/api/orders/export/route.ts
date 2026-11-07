@@ -40,8 +40,8 @@ export async function GET(request: NextRequest) {
     const filter: Record<string, any> = {}
 
     // Apply search
-    if (search) {
-      const searchRegex = new RegExp(search, 'i')
+    if (search.trim()) {
+      const searchRegex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
       filter.$or = [
         { orderName: { $regex: searchRegex } },
         { orderNumber: { $regex: searchRegex } },
@@ -88,6 +88,9 @@ export async function GET(request: NextRequest) {
       "Karat (KT)": order.selectedKarat ? `${order.selectedKarat}%` : "",
       "Order Name": order.orderName || "",
       "Filling In (g)": order.fillingIn || 0,
+      "Loss (g)": (order.fillingIn || 0) > 0 && (order.finishWeight || 0) > 0
+        ? parseFloat(((order.fillingIn || 0) - (order.finishWeight || 0)).toFixed(3))
+        : "",
       "Finish Weight (g)": order.finishWeight || 0,
       "Date": order.createdAt ? new Date(order.createdAt).toLocaleDateString("en-IN") : "",
     }))
@@ -99,6 +102,7 @@ export async function GET(request: NextRequest) {
       "Karat (KT)": "",
       "Order Name": "TOTAL",
       "Filling In (g)": 0,
+      "Loss (g)": "",
       "Finish Weight (g)": 0,
       "Date": "",
     }
@@ -127,6 +131,7 @@ export async function GET(request: NextRequest) {
       { wch: 10 }, // Karat (KT)
       { wch: 20 }, // Order Name
       { wch: 14 }, // Filling In
+      { wch: 12 }, // Loss
       { wch: 14 }, // Finish Weight
       { wch: 12 }, // Date
     ]

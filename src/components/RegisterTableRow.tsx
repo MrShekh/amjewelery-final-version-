@@ -122,6 +122,13 @@ export default function RegisterTableRow({
         {(order.fillingIn || 0).toFixed(3)} g
       </td>
 
+      {/* Loss (display only: Filling In - Finish Weight, shown once both are entered) */}
+      <td className="px-3 py-2 text-sm text-right text-foreground border-r border-border font-medium">
+        {(order.fillingIn || 0) > 0 && (order.finishWeight || 0) > 0
+          ? `${((order.fillingIn || 0) - (order.finishWeight || 0)).toFixed(3)} g`
+          : <span className="text-text-light italic">-</span>}
+      </td>
+
       {/* Finish Weight */}
       <td
         onClick={!isEditable ? undefined : () => handleCellClick('finishWeight', 'Finish Weight')}

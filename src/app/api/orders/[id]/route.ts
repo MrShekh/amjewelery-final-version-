@@ -678,7 +678,7 @@ async function syncOrderProcessesToKarigars(orderId: string) {
 
       // Find or create karigar by name
       let karigar = await karigarsCol.findOne({
-        name: { $regex: new RegExp(`^${karigarName.trim()}$`, 'i') }
+        name: { $regex: new RegExp(`^${karigarName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
       })
 
       if (!karigar) {

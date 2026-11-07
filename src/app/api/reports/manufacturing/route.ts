@@ -123,7 +123,7 @@ export async function GET(request: NextRequest) {
       // Additional filters that require order data
       ...(orderNumber ? [{
         $match: {
-          'orderDetails.orderNumber': { $regex: orderNumber, $options: 'i' }
+          'orderDetails.orderNumber': { $regex: orderNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
         }
       }] : []),
       ...(karat ? [{
@@ -180,7 +180,7 @@ export async function GET(request: NextRequest) {
       if (orderNumber) {
         countPipeline.push({
           $match: {
-            'orderDetails.orderNumber': { $regex: orderNumber, $options: 'i' }
+            'orderDetails.orderNumber': { $regex: orderNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
           }
         } as any)
       }
@@ -224,7 +224,7 @@ export async function GET(request: NextRequest) {
     if (orderNumber) {
       summaryPipeline.push({
         $match: {
-          'orderDetails.orderNumber': { $regex: orderNumber, $options: 'i' }
+          'orderDetails.orderNumber': { $regex: orderNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
         }
       } as any)
     }
