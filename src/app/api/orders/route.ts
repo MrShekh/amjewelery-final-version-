@@ -22,6 +22,8 @@ export async function GET(request: NextRequest) {
   const search = searchParams.get('search') || ''
   const dateFilter = searchParams.get('dateFilter') || 'all'
   const karatFilter = searchParams.get('karatFilter') || 'all'
+  // lite=true skips per-order customer/process/transaction lookups (used by the Production Register grid)
+  const lite = searchParams.get('lite') === 'true'
 
   const page = Math.max(parseInt(pageParam, 10) || 1, 1)
   const limit = Math.max(Math.min(parseInt(limitParam, 10) || 10, 100), 1)
@@ -84,31 +86,28 @@ export async function GET(request: NextRequest) {
 
     // Apply search on order fields and customer name
     if (search.trim()) {
-      // Escape regex special characters so inputs like "(", "+", "*" or "\" don't break the search
-      const searchRegex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
-
-      // Find customers matching search to filter by customerId
-      const matchingCustomers = await customersCol.find(
-        { name: searchRegex },
-        { projection: { _id: 1 } }
-      ).toArray()
-      const matchingCustomerIds = matchingCustomers.map((c: any) => c._id.toString())
-
-      const orConditions: Record<string, any>[] = [
-        { orderName: { $regex: searchRegex } },
-        { orderNumber: { $regex: searchRegex } },
-      ]
-
-      const searchAsNumber = Number(search)
-      if (!isNaN(searchAsNumber)) {
-        orConditions.push({ orderNumber: searchAsNumber })
-      }
-
-      if (matchingCustomerIds.length > 0) {
-        orConditions.push({ customerId: { $in: matchingCustomerIds } })
-      }
-
-      filter.$or = orConditions
+      // Every word typed must match (in any order) the order name, bag number or customer name.
+      // Special characters are escaped so inputs like "(", "+", "*" or "\\" don't break the search.
+      const tokens = search.trim().split(/\s+/).filter(Boolean).slice(0, 6)
+      const tokenConditions = await Promise.all(tokens.map(async (token) => {
+        const tokenRegex = new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+        const matchingCustomers = await customersCol.find(
+          { name: tokenRegex },
+          { projection: { _id: 1 } }
+        ).toArray()
+        const orConditions: Record<string, any>[] = [
+          { orderName: { $regex: tokenRegex } },
+          { orderNumber: { $regex: tokenRegex } },
+        ]
+        if (token !== '' && !isNaN(Number(token))) {
+          orConditions.push({ orderNumber: Number(token) })
+        }
+        if (matchingCustomers.length > 0) {
+          orConditions.push({ customerId: { $in: matchingCustomers.map((c: any) => c._id.toString()) } })
+        }
+        return { $or: orConditions }
+      }))
+      filter.$and = tokenConditions
     }
 
     // Apply date or month filter
@@ -154,7 +153,17 @@ export async function GET(request: NextRequest) {
 
     console.log(`[${requestId}] Query filter:`, filter)
 
-    const totalCount = await ordersCol.countDocuments(filter)
+    const totalsProjection = {
+      fillingIn: 1, fillingOut: 1, fillingLoss: 1, settingLoss: 1, ad: 1, klStone: 1,
+      polishLoss: 1, finishWeight: 1, makingCharge: 1, fillingKarigar: 1,
+      settingKarigar: 1, polishKarigar: 1, selectedKarat: 1
+    }
+    const skipEarly = (Math.max(parseInt(pageParam, 10) || 1, 1) - 1) * limit
+    // Run count, current page and totals queries concurrently instead of one after another
+    const countPromise = ordersCol.countDocuments(filter)
+    const pagePromise = ordersCol.find(filter).sort({ createdAt: -1 }).skip(skipEarly).limit(limit).toArray()
+    const totalsPromise = ordersCol.find(filter, { projection: totalsProjection }).toArray()
+    const totalCount = await countPromise
     console.log(`[${requestId}] Total matching orders: ${totalCount}`)
 
     if (totalCount === 0) {
@@ -164,12 +173,7 @@ export async function GET(request: NextRequest) {
 
     const skip = (page - 1) * limit
 
-    const orders = await ordersCol
-      .find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .toArray()
+    const orders = await pagePromise
 
     console.log(`[${requestId}] Found ${orders.length} orders in database for current page`)
 
@@ -178,6 +182,7 @@ export async function GET(request: NextRequest) {
     const ordersWithDetails = await Promise.all(
       orders.map(async (order, index) => {
         try {
+          if (lite) return toClientFormat(order)
           const orderId = order._id.toString()
           console.log(`[${requestId}] Processing order ${index + 1}/${orders.length}: ${orderId}`)
 
@@ -231,23 +236,7 @@ export async function GET(request: NextRequest) {
     )
 
     // Calculate totals for ALL matching orders (not just current page)
-    const allOrdersForTotals = await ordersCol.find(filter, {
-      projection: {
-        fillingIn: 1,
-        fillingOut: 1,
-        fillingLoss: 1,
-        settingLoss: 1,
-        ad: 1,
-        klStone: 1,
-        polishLoss: 1,
-        finishWeight: 1,
-        makingCharge: 1,
-        fillingKarigar: 1,
-        settingKarigar: 1,
-        polishKarigar: 1,
-        selectedKarat: 1
-      }
-    }).toArray()
+    const allOrdersForTotals = await totalsPromise
 
     // Analytics reset baseline: a per-order snapshot of these same numeric fields, taken at the
     // moment of the last "Save & Clear" (see /api/analytics/snapshot). Netting each order's current

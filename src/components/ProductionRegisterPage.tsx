@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, startTransition } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Plus, Download, Search, Calendar, X, ChevronLeft, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
@@ -89,7 +89,13 @@ export default function ProductionRegisterPage() {
   }
 
   // Fetch register list
+  const abortRef = useRef<AbortController | null>(null)
+
   const fetchOrders = useCallback(async () => {
+    // Cancel any in-flight request so a slow older response can't overwrite newer search results
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
     setLoading(true)
     try {
       const token = localStorage.getItem('sessionToken')
@@ -97,9 +103,10 @@ export default function ProductionRegisterPage() {
 
       const url = `/api/orders?search=${encodeURIComponent(
         debouncedSearch
-      )}&dateFilter=${dateFilter}&monthFilter=${selectedMonth}&page=${pagination.page}&limit=${pagination.limit}`
+      )}&dateFilter=${dateFilter}&monthFilter=${selectedMonth}&page=${pagination.page}&limit=${pagination.limit}&lite=true`
 
       const res = await fetch(url, {
+        signal: controller.signal,
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -119,10 +126,11 @@ export default function ProductionRegisterPage() {
       } else {
         showToast(data.error || 'Failed to load orders')
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return
       showToast('Network error loading orders')
     } finally {
-      setLoading(false)
+      if (abortRef.current === controller) setLoading(false)
     }
   }, [debouncedSearch, dateFilter, selectedMonth, pagination.page, pagination.limit])
 
@@ -433,6 +441,7 @@ export default function ProductionRegisterPage() {
       )}
 
       {/* Main Grid View */}
+      <div className={loading ? 'opacity-40 pointer-events-none transition-opacity flex-1 flex flex-col' : 'transition-opacity flex-1 flex flex-col'}>
       <RegisterDataTable
         orders={orders}
         totals={totals}
@@ -445,6 +454,7 @@ export default function ProductionRegisterPage() {
         page={pagination.page}
         limit={pagination.limit}
       />
+      </div>
 
       {/* Month sheet tabs at the bottom (Excel-style) */}
       <div className="bg-surface border border-border rounded-xl p-2.5 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 overflow-x-auto">

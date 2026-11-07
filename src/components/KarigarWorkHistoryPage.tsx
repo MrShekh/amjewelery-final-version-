@@ -474,7 +474,7 @@ const KarigarWorkHistoryPage: React.FC<KarigarWorkHistoryPageProps> = ({ karigar
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase().trim()
       const orderName = process.order?.orderName?.toLowerCase() || ''
-      const orderNumber = process.order?.orderNumber?.toLowerCase() || ''
+      const orderNumber = String(process.order?.orderNumber ?? '').toLowerCase()
       const orderId = process.order?.id?.toLowerCase() || ''
       const customerName = process.order?.customer?.name?.toLowerCase() || ''
       const processType = process.processType?.toLowerCase().replace('_', ' ') || ''
